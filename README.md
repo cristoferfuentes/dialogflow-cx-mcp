@@ -140,8 +140,8 @@ una ruta sin quitar antes la ruta.**
 ## Instalación
 
 ```bash
-git clone https://github.com/<TU-USUARIO>/mcp-cx-playbook.git
-cd mcp-cx-playbook
+git clone https://github.com/<TU-USUARIO>/dialogflow-cx-mcp.git
+cd dialogflow-cx-mcp
 python3 -m venv .venv
 .venv/bin/pip install -e .
 cp .env.example .env      # y rellenarlo (ver abajo)
@@ -602,6 +602,18 @@ python smoke_test.py    # prueba de punta a punta por el protocolo MCP
   y los experimentos de captura de tráfico de la consola. No hacen falta para
   operar. Los ids de agente que usan salen del entorno
   (`CXP_PROBE_AGENTS`, `CXP_PROBE_TARGETS`), nunca cableados.
+
+---
+
+## Publicar
+
+El repositorio se llama **`dialogflow-cx-mcp`**. Para publicarlo (lo hace
+quien tenga la cuenta, porque es una acción visible para cualquiera):
+
+```bash
+gh repo create dialogflow-cx-mcp --public --source=. --push \
+   --description "MCP: espejo de la API v3beta1 de Dialogflow CX + los campos que la API publica no puede expresar"
+```
 
 ---
 
