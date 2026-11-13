@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Smoke test del MCP: llama a las herramientas de verdad, por el protocolo MCP.
+
+Es **generico**: no hay ningun agente, flow, pagina ni playbook cableado. Todo
+se descubre en el agente que indica el `.env` (`CXP_DEFAULT_AGENT`), y lo que
+se escribe se hace sobre recursos **TEMPORALES** que se borran al final.
+
+    python smoke_test.py            # usa el agente por defecto del .env
+    CXP_AGENT_READWRITE=<uuid> python smoke_test.py
+
+REGLA DURA: solo se escribe en un agente de `CXP_AGENT_READWRITE` (nuestra
+copia). Nunca en un agente de referencia: se romperia la paridad con la
+consola.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+HERE = Path(__file__).resolve().parent
+PY = sys.executable or str(HERE / ".venv" / "bin" / "python")
+SERVER = str(HERE / "server.py")
+
+FAIL: list[str] = []
+
+
+def check(nombre: str, ok: bool, detalle: str = "") -> None:
+    print(f"   [{'OK ' if ok else 'FALLO'}] {nombre}" + (f" -- {detalle}" if detalle else ""))
+    if not ok:
+        FAIL.append(nombre)
+
+
+def _first(res):
+    for item in res.content:
+        text = getattr(item, "text", None)
+        if text:
+            try:
+                return json.loads(text)
+            except ValueError:
+                return text
+    return res
+
+
+async def main() -> int:
+    # El SDK de MCP NO hereda el entorno del padre (usa un subconjunto seguro),
+    # asi que hay que pasarlo explicito.
+    env = dict(os.environ)
+    params = StdioServerParameters(command=PY, args=[SERVER], env=env)
+
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            init = await session.initialize()
+            info = getattr(init, "serverInfo", None) or getattr(init, "server_info", None)
+            print(f"== servidor: {getattr(info, 'name', '?')}")
+            tools = await session.list_tools()
+            nombres = {t.name for t in tools.tools}
+            print(f"== herramientas ({len(nombres)}): {', '.join(sorted(nombres))}")
+            for esperadas in ("cx_gaps", "cx_set_console_field",
+                              "cx_set_group_route_playbook", "cx_set_route_playbook",
+                              "cx_set_flow_route_playbook", "cx_limites_api"):
+                check(f"existe la herramienta {esperadas}", esperadas in nombres)
+
+            # ---------------------------------------------------------- status
+            print("\n== cx_status ==")
+            st = _first(await session.call_tool("cx_status", {}))
+            check("credenciales_ok", st.get("credenciales_ok") is True)
+            check("sesion_aceptada", st.get("sesion_aceptada") is True)
+            check("api_version v3beta1", st.get("api_version") == "v3beta1")
+            check("tabla de permisos", len(st.get("permisos") or []) >= 1,
+                  f"n={len(st.get('permisos') or [])}")
+
+            agente = st.get("agente_por_defecto") or st.get("default_agent") or ""
+            if not agente:
+                print("   no hay agente por defecto: pon CXP_DEFAULT_AGENT en el .env")
+                return 1
+            print(f"   agente: {agente}")
+
+            # -------------------------------------------------------- discover
+            print("\n== cx_discover ==")
+            d = _first(await session.call_tool("cx_discover", {}))
+            check("el mapa de la API tiene metodos", (d.get("total_metodos") or 0) > 100,
+                  f"total={d.get('total_metodos')}")
+            det = _first(await session.call_tool("cx_discover",
+                                                 {"method": "agents.flows.train"}))
+            check("detalle de un metodo", det.get("metodo", {}).get("http") == "POST")
+
+            # --------------------------------------------------------- lecturas
+            print("\n== lecturas ==")
+            ga = _first(await session.call_tool("cx_get_agent", {"agent": agente}))
+            check("GET agent", str(ga.get("datos", {}).get("name", "")).endswith(agente),
+                  str(ga.get("error") or "")[:120])
+            fl = _first(await session.call_tool("cx_list_flows", {"agent": agente}))
+            flows = fl.get("flows") or []
+            check("el agente tiene flows", len(flows) > 0, f"n={len(flows)}")
+            pb = _first(await session.call_tool("cx_list_playbooks", {"agent": agente}))
+            playbooks = pb.get("playbooks") or []
+            check("el agente tiene playbooks", len(playbooks) > 0, f"n={len(playbooks)}")
+            if not playbooks:
+                print("   sin playbooks: se saltan las pruebas de destino a playbook")
+                return 1
+            pb_nombre = playbooks[0].get("displayName") or playbooks[0].get("name")
+            pb_id = (playbooks[0].get("id")
+                     or (playbooks[0].get("name") or "").rsplit("/", 1)[-1])
+
+            # --------------------------------------------------------- huecos
+            print("\n== cx_gaps (los huecos de la API publica) ==")
+            g = _first(await session.call_tool("cx_gaps", {"agent": agente,
+                                                           "incluir_paginas": False}))
+            check("cx_gaps responde", "error" not in g, str(g.get("error"))[:150])
+            check("cx_gaps detecta huecos", (g.get("total_huecos") or 0) > 0,
+                  f"total={g.get('total_huecos')}")
+            check("cx_gaps trae el catalogo medido",
+                  len(g.get("catalogo") or []) > 0)
+            campos = {h.get("campo") for h in (g.get("huecos") or [])}
+            check("detecta un campo fuera de esquema", len(campos) > 0,
+                  ", ".join(sorted(c for c in campos if c)[:8]))
+            g2 = _first(await session.call_tool("cx_gaps", {"agent": agente,
+                                                            "scope": "Tool",
+                                                            "incluir_paginas": False}))
+            check("cx_gaps filtra por scope", "error" not in g2, str(g2)[:120])
+
+            # ------------------------------------------------- recursos temporales
+            print("\n== recursos temporales ==")
+            marca = str(int(time.time()) % 100000)
+            flow = _first(await session.call_tool("cx_api", {
+                "method": "POST", "path": "agents/{agent}/flows", "agent": agente,
+                "body": {"displayName": f"zz_tmp_smoke_{marca}", "description": "temporal"}}))
+            flow_id = (flow.get("datos") or {}).get("name", "").rsplit("/", 1)[-1]
+            check("flow temporal creado", bool(flow_id), str(flow.get("error"))[:120])
+            if not flow_id:
+                return 1
+
+            try:
+                pg = _first(await session.call_tool("cx_api", {
+                    "method": "POST", "path": "agents/{agent}/flows/{flow}/pages",
+                    "agent": agente, "params": {"flow": flow_id},
+                    "body": {"displayName": "Pagina smoke",
+                             "entryFulfillment": {"messages": [
+                                 {"text": {"text": ["hola"]}}]}}}))
+                page_name = (pg.get("datos") or {}).get("name", "")
+                check("pagina temporal creada", bool(page_name), str(pg.get("error"))[:160])
+
+                et = _first(await session.call_tool("cx_api", {
+                    "method": "POST", "path": "agents/{agent}/entityTypes",
+                    "agent": agente,
+                    "body": {"displayName": f"zz_tmp_smoke_et_{marca}", "kind": "KIND_MAP",
+                             "entities": [{"value": "uno", "synonyms": ["uno"]}]}}))
+                et_name = (et.get("datos") or {}).get("name", "")
+                check("entityType temporal creado", bool(et_name), str(et.get("error"))[:160])
+
+                # Una ruta con destino a playbook: sin ella no hay nada que
+                # probar en los tres niveles (pagina, flow, grupo de rutas).
+                st = _first(await session.call_tool("cx_status", {}))
+                proyecto = st.get("proyecto") or ""
+                pb_ref = (f"projects/{proyecto}/locations/global/agents/{agente}"
+                          f"/playbooks/{pb_id}")
+                ruta = [{"condition": "true", "targetPlaybook": pb_ref}]
+
+                pflow = _first(await session.call_tool("cx_api", {
+                    "method": "PATCH", "path": "agents/{agent}/flows/{flow}",
+                    "agent": agente, "params": {"flow": flow_id},
+                    "body": {"name": f"projects/{proyecto}/locations/global/agents/{agente}"
+                                     f"/flows/{flow_id}", "transitionRoutes": ruta},
+                    "query": {"updateMask": "transitionRoutes"}}))
+                check("ruta con playbook en el flow temporal",
+                      bool(pflow.get("datos", {}).get("transitionRoutes")),
+                      str(pflow.get("error"))[:140])
+
+                ppage = _first(await session.call_tool("cx_api", {
+                    "method": "PATCH", "path": "agents/{agent}/flows/{flow}/pages/{page}",
+                    "agent": agente, "params": {"flow": flow_id,
+                                                "page": page_name.rsplit("/", 1)[-1]},
+                    "body": {"name": page_name, "transitionRoutes": ruta},
+                    "query": {"updateMask": "transitionRoutes"}}))
+                check("ruta con playbook en la pagina temporal",
+                      bool(ppage.get("datos", {}).get("transitionRoutes")),
+                      str(ppage.get("error"))[:140])
+
+                grp = _first(await session.call_tool("cx_api", {
+                    "method": "POST", "path": "agents/{agent}/transitionRouteGroups",
+                    "agent": agente,
+                    "body": {"displayName": f"zz_tmp_smoke_grp_{marca}",
+                             "transitionRoutes": ruta}}))
+                group_name = (grp.get("datos") or {}).get("name", "")
+                check("grupo de rutas temporal creado", bool(group_name),
+                      str(grp.get("error"))[:160])
+
+                # ------------------------------- destino a playbook (3 niveles)
+                print("\n== destino a playbook (los 3 niveles) ==")
+                r = _first(await session.call_tool("cx_set_route_playbook", {
+                    "agent": agente, "flow": flow_id, "page": page_name.rsplit("/", 1)[-1],
+                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
+                check("nivel pagina: dry-run", r.get("modo") == "dry-run",
+                      str(r.get("error") or r.get("modo"))[:140])
+
+                fr = _first(await session.call_tool("cx_set_flow_route_playbook", {
+                    "agent": agente, "flow": flow_id, "route": "true",
+                    "playbook": pb_nombre, "dry_run": True}))
+                check("nivel flow: dry-run", fr.get("modo") == "dry-run",
+                      str(fr.get("error") or fr.get("modo"))[:140])
+
+                gr = _first(await session.call_tool("cx_set_group_route_playbook", {
+                    "agent": agente, "group": group_name.rsplit("/", 1)[-1],
+                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
+                check("nivel grupo de rutas: dry-run", gr.get("modo") == "dry-run",
+                      str(gr.get("error") or gr.get("modo"))[:140])
+
+                # ------------------------------- escritura de un campo fuera de esquema
+                print("\n== cx_set_console_field (fuera de esquema) ==")
+                dry = _first(await session.call_tool("cx_set_console_field", {
+                    "recurso": et_name, "campo": "entities[0].dtmfPattern",
+                    "valor": "9", "dry_run": True, "agent": agente}))
+                check("dry-run no escribe", dry.get("modo") == "dry-run",
+                      str(dry.get("error"))[:120])
+                wri = _first(await session.call_tool("cx_set_console_field", {
+                    "recurso": et_name, "campo": "entities[0].dtmfPattern",
+                    "valor": "9", "dry_run": False, "agent": agente}))
+                check("dtmfPattern escrito y verificado", wri.get("verificado") is True,
+                      str(wri)[:200])
+
+                # ------------------------------- limites (la memoria del MCP)
+                print("\n== cx_limites_api ==")
+                lim = _first(await session.call_tool("cx_limites_api", {}))
+                ids = {l.get("id") for l in (lim.get("limites") or [])}
+                check("cx_limites_api devuelve limites", len(ids) > 5, f"n={len(ids)}")
+                check("incluye el limite de los campos fuera de esquema",
+                      "campos_fuera_de_esquema" in ids, ", ".join(sorted(ids))[:120])
+            finally:
+                print("\n== limpieza ==")
+                for path, params in (
+                        (f"agents/{{agent}}/transitionRouteGroups/{group_name.rsplit('/', 1)[-1]}", {}),
+                        (f"agents/{{agent}}/entityTypes/{et_name.rsplit('/', 1)[-1]}", {}),
+                        (f"agents/{{agent}}/flows/{flow_id}", {})):
+                    if "{" in path and path.split("/")[2] == "":
+                        continue
+                    rev = _first(await session.call_tool("cx_api", {
+                        "method": "DELETE", "path": path, "agent": agente,
+                        "params": params}))
+                    print(f"   borrado {path}: {rev.get('error') or 'ok'}")
+
+            # ------------------------------------------------------- guardas
+            print("\n== guardas ==")
+            den = _first(await session.call_tool("cx_list_flows", {
+                "agent": "00000000-0000-0000-0000-000000000000"}))
+            check("agente sin permiso: denegado", "error" in den, str(den)[:120])
+
+    print(f"\n== {'TODO OK' if not FAIL else 'FALLOS: ' + ', '.join(FAIL)} ==")
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))

@@ -1,0 +1,30 @@
+# Credenciales y estado de sesion
+.env
+.session-state.json
+
+# Perfiles de navegador (los usa el helper de login)
+.browser-profile/
+.browser-profile-*/
+
+# Certificado del proxy local (lo usa el MITM de las sondas)
+.proxy-cert/
+
+# Discovery doc cacheado (se descarga solo)
+.discovery/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editores / SO
+.idea/
+.vscode/
+.DS_Store
