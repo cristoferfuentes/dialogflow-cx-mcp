@@ -7,7 +7,8 @@ name = "dialogflow-cx-mcp"
 version = "0.3.0"
 description = "MCP server: a mirror of the Dialogflow CX v3beta1 API + the fields the public API cannot express"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = [
     "mcp",
@@ -23,7 +24,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
