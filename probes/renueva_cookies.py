@@ -25,6 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from _redact import escribe_privado
+
 from cxp.chrome_cdp import RealChrome
 from cxp.config import PKG_DIR, load_config
 
@@ -86,7 +88,8 @@ def main() -> int:
             nuevo.append(linea)
     if not any(linea.startswith("CXP_COOKIE=") for linea in nuevo):
         nuevo.append(f'CXP_COOKIE="{cookie}"')
-    env_path.write_text("\n".join(nuevo) + "\n", encoding="utf-8")
+    # The .env carries the session cookies: only its owner can read it.
+    escribe_privado(env_path, "\n".join(nuevo) + "\n")
     os.chmod(env_path, stat.S_IRUSR | stat.S_IWUSR)
     print(f"cookies updated in {env_path}")
     return 0

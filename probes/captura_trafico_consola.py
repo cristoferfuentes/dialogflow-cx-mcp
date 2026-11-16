@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -30,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import targets_de_sonda
+from _redact import escribe_json_privado
 
 from cxp.chrome_cdp import RealChrome
 from cxp.config import load_config
@@ -111,7 +111,7 @@ def main() -> int:
         print("could not reload:", exc)
     time.sleep(args.wait / 1000)
 
-    Path(args.out).write_text(json.dumps(peticiones, ensure_ascii=False, indent=1))
+    escribe_json_privado(args.out, peticiones)
     print(f"backend requests captured: {len(peticiones)} -> {args.out}")
     for p in peticiones[:40]:
         print(f"  {p['metodo']:<6} {p['ruta']}")

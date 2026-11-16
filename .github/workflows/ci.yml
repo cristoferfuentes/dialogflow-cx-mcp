@@ -77,6 +77,28 @@ jobs:
 
           exit $fail
 
+      - name: No credentials in the HISTORY either
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # The whole history is scanned, not only the current tree: a secret
+          # that was committed and removed later is still published.
+          if git log --all -p --no-color | \
+               grep -nIE '(SAPISID|SSID|HSID|APISID|SIDCC)=[A-Za-z0-9_-]{16,}' | \
+               grep -vE '=\.\.\.|=XXXX|=YYYY|=ZZZZ|=WWWW|=VVVV|dummy' | head -20; then
+            echo "::error::a real-looking session cookie is in the git history"
+            fail=1
+          fi
+
+          if git log --all -p --no-color | \
+               grep -oE 'AIza[0-9A-Za-z_-]{30,}' | sort -u | head -20; then
+            echo "::error::a real Google API key is in the git history"
+            fail=1
+          fi
+
+          exit $fail
+
       - name: The .env is never tracked
         run: |
           set -euo pipefail

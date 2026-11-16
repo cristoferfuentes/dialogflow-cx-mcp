@@ -45,7 +45,25 @@ The project therefore:
   (`CXP_AGENT_READ` / `CXP_AGENT_READWRITE`), so a misconfigured server cannot touch
   agents you did not list;
 * re-signs every request with a fresh `SAPISIDHASH` timestamp and never logs the
-  `Cookie` or `Authorization` headers.
+  `Cookie` or `Authorization` headers;
+* has a CI job that fails the build if a session cookie, a Google API key or a `.env`
+  appears **in the tree or in the git history**.
+
+## How the allowlist is enforced
+
+The permission check is deliberately **not** a filter in the MCP layer: it lives in the
+lowest layer (`cxp/console_api.py`), so that no tool — not even the generic `cx_api`
+passthrough — can reach an agent that is not on the list.
+
+| rule | why |
+|---|---|
+| the check compares the **resolved id**, not an alias | the `"original"` alias can be bypassed by passing the agent's raw UUID |
+| it looks at **every** agent of the request, in the path **and** in the query string | `cx_api` can put the whole resource name in `?name=…`; an agent that is only in the query is just as real |
+| a write whose URL mentions **no agent** is rejected (**fail closed**) | every write in CX is per-agent, so a write without an agent can only be a crafted path |
+| the path is **canonicalized** before it is sent (`.`/`..` resolved, `%2e`/`%2f` rejected) | the server resolves `..`, so `agents/OK/../../agents/FORBIDDEN` would land on `FORBIDDEN` while the guard read `OK` |
+| `cx_batch` checks **each sub-request** | a batch must not be a way around the allowlist |
+
+The behaviour is pinned by `tests/test_guard_seguridad.py`.
 
 If you ever believe you leaked your cookies: **sign out of Google** to invalidate the
 session, then paste a fresh header into your `.env`.

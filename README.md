@@ -419,11 +419,20 @@ The guard compares the **resolved id** (not an alias) and is enforced in the **l
 layer** (`cxp/console_api.py`), not only in the MCP layer: a `PATCH` that slips through
 `cx_api` also goes through the permission check. Specifically:
 
-- `ConsoleApi.request()` deduces the agent from the **path** of the request and applies
-  `assert_writable` to every write verb (`POST/PATCH/PUT/DELETE`) and `assert_readable`
-  to the rest.
+- `ConsoleApi.request()` checks the allowlist against **every agent the request can
+  reach** — the ones in the path *and* the ones in the query string (`?name=…`),
+  because the generic passthrough lets the caller put the whole resource name there.
+- A write verb whose URL mentions **no agent at all** is rejected (**fail closed**):
+  every write in CX is per-agent, so a write without an agent can only be a
+  hand-crafted path trying to slip the check.
+- The path is canonicalized before the check (`.`/`..` resolved, encoded traversal
+  rejected), so the resource the guard sees is the resource the server will reach.
+- `cx_batch` applies the guard **per sub-request**: a batch that mixes read and write
+  agents is evaluated one by one.
 - `assert_playbook_writable()` requires `CXP_AGENT_READWRITE` to touch a playbook.
 - No path (not even the generic passthrough) can bypass the allowlist.
+
+The behaviours above are covered by `tests/test_guard_seguridad.py`.
 
 ---
 
@@ -497,6 +506,11 @@ One single rule, the same for everything (it lives in `cxp/endpoint.py`):
 
 `version=` (or the path prefix) chooses the proto: `v3beta1`, `v3alpha1`, `v3`,
 `v2beta1`. The backend serves all four with the same descriptor.
+
+The path you pass is **canonicalized** before it is sent: `.` and `..` are
+resolved, encoded traversal (`%2e`, `%2f`) is rejected, and a path that tries to
+leave the root is an error. The reason is security, not tidiness — see
+[Security](#security).
 
 ### Typed core tools
 
@@ -1027,10 +1041,18 @@ catalogue and the live measurement of all 38 fields) is in
 * **Your browser session cookies are credentials.** Treat them like a password: never
   commit them, never share them, never paste them in an issue.
 * `.env`, `.session-state.json`, browser profiles and the discovery cache are
-  gitignored. Double-check before pushing.
+  gitignored. The CI has a job that fails the build if a cookie, a Google API key
+  or a `.env` appears **in the tree or in the git history**.
 * The MCP enforces an **allowlist** of agents it may touch: anything not in
-  `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` is not accessible at all.
+  `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` is not accessible at all. The check runs
+  in the low layer, against every agent of the request, and it **fails closed** on
+  writes it cannot attribute to an agent (see
+  [Per-agent permissions](#per-agent-permissions-allowlist)).
+* The path of a request is canonicalized before it is sent, so a crafted path
+  cannot make the server reach a different agent than the one that was checked.
 * Write access should only be granted to **your own copy** of an agent.
+* The probes that capture console traffic **redact the credentials** before writing
+  them, and write their output with mode `0600`.
 * If you think you have leaked a cookie, **sign out of Google** and rotate your
   session.
 

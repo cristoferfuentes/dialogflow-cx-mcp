@@ -63,6 +63,26 @@ def es_absoluta(path: str) -> bool:
     return p.startswith("/") or p.startswith("projects/")
 
 
+def _canonica(path: str) -> str:
+    """Resolve the `.` and `..` segments of a path, POSIX style.
+
+    A `..` that would leave the root is an error (it is not a path the
+    caller can be allowed to ask for)."""
+    partes: list[str] = []
+    for seg in (path or "").split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if not partes:
+                raise PathError("la ruta sale de la raiz (traversal)")
+            partes.pop()
+            continue
+        partes.append(seg)
+    if not partes:
+        raise PathError("ruta vacia")
+    return "/".join(partes)
+
+
 def resolve_path(path: str, *, version: str = "", project: str = "",
                  location: str = "", name: str = "", parent: str = "",
                  params: dict[str, Any] | None = None,
@@ -106,9 +126,28 @@ def resolve_path(path: str, *, version: str = "", project: str = "",
     if not p:
         raise PathError("ruta vacia")
 
+    # --- canonicalization (SECURITY) --------------------------------------
+    # The path is user-supplied (the generic passthrough lets the caller give
+    # any path) and it ends up **verbatim** in the URL. If it carried `..`,
+    # the server would resolve it and land on a resource that the permission
+    # check had not seen: `agents/OK/../../agents/FORBIDDEN` passes the guard
+    # (it reads `OK`) and the server writes on `FORBIDDEN`.
+    #
+    # It is canonicalized HERE, BEFORE the project prefix is added, so that a
+    # `..` can neither reach another agent nor escape the prefix
+    # (`../../OTRO/locations/...` would otherwise become another project).
+    if re.search(r"%2e|%2f", p, re.IGNORECASE):
+        raise PathError(
+            "la ruta lleva traversal codificado (%2e/%2f): no se admite"
+        )
+    # A path that starts with "/" is ABSOLUTE from the backend root; that has
+    # to be decided BEFORE canonicalizing (which drops the empty segments).
+    absoluta = p.startswith("/")
+    p = _canonica(p)
+
     # --- prefixes ---------------------------------------------------------
-    if p.startswith("/"):
-        p = p[1:]
+    if absoluta:
+        pass  # absolute from the root: no project prefix is added
     elif not p.startswith("projects/"):
         if not project:
             raise PathError(f"hace falta el proyecto para la ruta relativa {path!r}")

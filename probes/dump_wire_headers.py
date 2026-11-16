@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -86,7 +87,10 @@ def main() -> int:
     with open(args.out, "w", encoding="utf-8") as fh:
         for k, v in headers.items():
             fh.write(f"{k}: {v}\n")
-    print(f"== headers in {args.out}")
+    # SECURITY: this file carries the LIVE session cookies (it is fed to
+    # curl). 0600: only its owner can read it.
+    os.chmod(args.out, 0o600)
+    print(f"== headers in {args.out} (0600: it carries the session cookies)")
 
     a, f, pg = AGENTS[args.agent]
     url = (f"https://{CONSOLE_HOST}/v3alpha1/projects/{cfg.project}/locations/global/agents/{a}"

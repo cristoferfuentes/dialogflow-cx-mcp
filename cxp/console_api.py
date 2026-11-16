@@ -45,6 +45,7 @@ from .guard import (
     PermissionDeniedError,
     agent_from_path,
     assert_readable,
+    assert_url_allowed,
     assert_writable,
 )
 from .httpclient import HttpStatusError, Session
@@ -284,16 +285,11 @@ class ConsoleApi:
         no route (not even the generic passthrough `cx_api`) can
         bypass the agent allowlist."""
         verb = method.upper()
-        project, agent = agent_from_path(url)
-        if agent:
-            try:
-                if verb in WRITE_VERBS:
-                    assert_writable(project, agent, self.cfg)
-                else:
-                    assert_readable(project, agent, self.cfg)
-            except PermissionDeniedError as exc:
-                # The URL is needed to know WHICH request was rejected.
-                raise PermissionDeniedError(f"{exc} [url={url}]") from exc
+        try:
+            assert_url_allowed(url, verb, self.cfg)
+        except PermissionDeniedError as exc:
+            # The URL is needed to know WHICH request was rejected.
+            raise PermissionDeniedError(f"{exc} [url={url}]") from exc
         if query:
             sep = "&" if "?" in url else "?"
             url = url + sep + urlencode({k: v for k, v in query.items()
@@ -495,6 +491,14 @@ class ConsoleApi:
             # MEASURED: the host depends on the path location.
             url = (f"https://{host_de_path(path)}/{self.cfg.api_version}/"
                    f"{path.lstrip('/')}?{urlencode(q)}")
+            # THE GUARD, per sub-request: a batch that mixes read and write
+            # agents is evaluated sub by sub. It was MISSING here (the
+            # sub-request went straight to `http.json`, skipping `request()`),
+            # so `cx_batch` could write to any agent. Now it cannot.
+            try:
+                assert_url_allowed(url, method, self.cfg)
+            except PermissionDeniedError as exc:
+                return {"status": 403, "data": {"error": str(exc)}}
             headers = self._headers_de_url(
                 url, {"content-type": "application/json"}
                 if req.get("body") is not None else None)

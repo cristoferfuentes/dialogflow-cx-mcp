@@ -7,7 +7,6 @@ It serves to compare with what Python sends and see which header is missing.
 """
 from __future__ import annotations
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -17,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import agente, targets_de_sonda
+from _redact import escribe_json_privado
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
@@ -87,7 +87,7 @@ def main() -> int:
             print(f"    {k}: {v[:150]}")
         print("    cookies:", [c["name"] for c in w["associatedCookies"]][:30])
 
-    Path("/tmp/wire.json").write_text(json.dumps(wire, indent=1, ensure_ascii=False), encoding="utf-8")
+    escribe_json_privado("/tmp/wire.json", wire)
     return 0
 
 

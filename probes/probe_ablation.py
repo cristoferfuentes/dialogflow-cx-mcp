@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import agente, targets_de_sonda
+from _redact import escribe_privado, redacta
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
@@ -40,7 +41,7 @@ GROUPS = {
 
 
 def curl(headers: dict[str, str], url: str) -> tuple[int, str]:
-    Path("/tmp/abl.txt").write_text("\n".join(f"{k}: {v}" for k, v in headers.items()),
+    escribe_privado("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redacta(headers).items()),
                                     encoding="utf-8")
     r = subprocess.run(
         ["curl", "-sS", "--compressed", "--http2", "-o", "/tmp/abl_out.json",
@@ -118,7 +119,7 @@ def main() -> int:
     print(f"C) MINIMUM (9 headers)             -> HTTP {code}")
 
     # minimum + http1.1
-    Path("/tmp/abl.txt").write_text("\n".join(f"{k}: {v}" for k, v in fresh(minimo).items()),
+    escribe_privado("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redacta(fresh(minimo)).items()),
                                     encoding="utf-8")
     r = subprocess.run(["curl", "-sS", "--compressed", "--http1.1", "-o", "/tmp/abl_out.json",
                         "-w", "%{http_code}", "-H", "@/tmp/abl.txt", url],

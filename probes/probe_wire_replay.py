@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import agente, targets_de_sonda
+from _redact import escribe_privado
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
@@ -77,8 +78,9 @@ def main() -> int:
     # They are replayed as they are (only the Authorization is recomputed with a fresh ts).
     hdrs = {k: v for k, v in w.items() if not k.startswith(":") and k != "cookie"}
     hdrs["cookie"] = w.get("cookie", "")
-    Path("/tmp/wire_exact.txt").write_text(
-        "\n".join(f"{k}: {v}" for k, v in hdrs.items()), encoding="utf-8")
+    # The file carries the live cookie: only its owner can read it.
+    escribe_privado("/tmp/wire_exact.txt",
+                   "\n".join(f"{k}: {v}" for k, v in hdrs.items()))
 
     for label, extra in (("http2", ["--http2"]), ("http1.1", ["--http1.1"])):
         r = subprocess.run(

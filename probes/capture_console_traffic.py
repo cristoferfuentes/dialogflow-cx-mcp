@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import agentes_de_sonda
+from _redact import escribe_json_privado
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
@@ -127,9 +128,9 @@ def main() -> int:
                 print(f"        targetPlaybook: {r.get('targetPlaybook')}", flush=True)
 
     if args.out:
-        Path(args.out).write_text(json.dumps(
-            {"requests": requests, "bodies": [{"url": u, "body": b} for u, b in bodies]},
-            indent=1, ensure_ascii=False), encoding="utf-8")
+        escribe_json_privado(args.out,
+                             {"requests": requests,
+                              "bodies": [{"url": u, "body": b} for u, b in bodies]})
         print(f"== written {args.out}", flush=True)
     return 0
 

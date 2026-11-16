@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _entorno import targets_de_sonda
+from _redact import escribe_json_privado
 
 from cxp.auth import pick_sapisid
 from cxp.browser import ConsoleBrowser
@@ -137,7 +138,7 @@ def main() -> int:
 
     (OUT / f"dom_{args.agent}.html").write_text(dom, encoding="utf-8")
     (OUT / f"text_{args.agent}.txt").write_text(text, encoding="utf-8")
-    (OUT / f"requests_{args.agent}.json").write_text(json.dumps(reqs, indent=1), encoding="utf-8")
+    escribe_json_privado(OUT / f"requests_{args.agent}.json", reqs)
 
     summary = {
         "url": br._page.url,
