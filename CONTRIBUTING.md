@@ -38,8 +38,14 @@ the console. Create temporary resources and delete them.
 ```bash
 pytest                  # unit tests (no network)
 python smoke_test.py    # end-to-end test (needs credentials)
-ruff check cxp server.py tests
+ruff check cxp server.py tests probes tools
+
+python tools/verifica.py    # all of the above + secret scan, and regenerates the badges
 ```
+
+The repository has **no hosted CI**: the badges of the README are static SVG files
+produced by `tools/verifica.py` on the machine that runs it. If you change the code,
+run it and commit the regenerated badges.
 
 * The **unit tests** must not touch the network. If your change needs to verify
   something about the backend, it goes in `probes/`, not in `tests/`.

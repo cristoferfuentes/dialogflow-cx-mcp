@@ -46,8 +46,9 @@ The project therefore:
   agents you did not list;
 * re-signs every request with a fresh `SAPISIDHASH` timestamp and never logs the
   `Cookie` or `Authorization` headers;
-* has a CI job that fails the build if a session cookie, a Google API key or a `.env`
-  appears **in the tree or in the git history**.
+* ships a local verification script (`tools/verifica.py`) that fails if a session
+  cookie, a Google API key or a `.env` appears **in the tree or in the git
+  history**.
 
 ## How the allowlist is enforced
 

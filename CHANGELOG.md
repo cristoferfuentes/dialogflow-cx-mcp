@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `tools/verifica.py`: local verification runner. It runs the unit tests, the linter,
+  the server start-up check and the secret scan (working tree **and** git history),
+  and regenerates the badges in `docs/badges/`.
+
+### Removed
+
+- The GitHub Actions workflow: the repository ships the source code only, with no
+  hosted CI. The badges of the README are static SVG files generated from a real
+  local run.
+- The `github-actions` ecosystem of `dependabot.yml` (there are no workflows left
+  to update).
+
 ## [0.3.0] — 2026-11-16
 
 ### Added
