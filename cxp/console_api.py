@@ -1,43 +1,43 @@
-"""Cliente del backend interno de la consola de Dialogflow CX.
+"""Client for the internal backend of the Dialogflow CX console.
 
-Este backend (`dialogflow.clients6.google.com/{version}`) es el que usa la
-consola "Conversational Agents" y **sí** expone `targetPlaybook` en las
-`transitionRoutes` (el proto publico lo descarta en silencio). Acepta la
-**autenticacion de primera parte**: las cookies de Google del navegador y una
-firma `SAPISIDHASH`.
+This backend (`dialogflow.clients6.google.com/{version}`) is the one used by the
+"Conversational Agents" console and **does** expose `targetPlaybook` in the
+`transitionRoutes` (the public proto silently drops it). It accepts
+**first-party authentication**: the browser's Google cookies and a
+`SAPISIDHASH` signature.
 
-Sirve las tres versiones (`v3alpha1`, `v3beta1`, `v3`) con el mismo discovery
-doc que la API publica: por eso el MCP puede ser un **espejo de v3beta1** y
-ademas hacer lo que la API publica no puede (destino a playbook).
+It serves the three versions (`v3alpha1`, `v3beta1`, `v3`) with the same discovery
+doc that the public API publishes: that is why the MCP can be a **mirror of v3beta1** and
+also do what the public API cannot (target to playbook).
 
-RECETA (medida, no inventada)
+RECIPE (measured, not invented)
 ------------------------------
-Cabeceras minimas que hacen que el backend acepte la llamada:
+Minimum headers that make the backend accept the call:
 
     authorization: SAPISIDHASH ts_h SAPISID1PHASH ts_h SAPISID3PHASH ts_h
-    cookie:        las 5 cookies de sesion de `.google.com`
+    cookie:        the 5 session cookies of `.google.com`
     x-origin:      <console_origin>
     x-referer:     <console_origin>
     x-goog-authuser: 0
     referer:       https://dialogflow.clients6.google.com/static/proxy.html?usegapi=1
 
-* `h = sha1(f"{ts} {valor_de_SAPISID} {console_origin}")`, `ts` = epoch actual.
-  Los tres hash son IGUALES: la consola usa el valor de `SAPISID` para los tres.
-* Las cookies **obligatorias** son exactamente 5: `SAPISID`, `SID`, `HSID`,
-  `SSID`, `APISID` (medido: con 4 de 5 -> HTTP 401).
-* **No mandar cabecera `Origin`**: si se manda, el servidor exige que `Origin` y
-  `Referer` coincidan -> HTTP 400 "Origin and Referer header don't match". El
-  origen de la app va en `X-Origin`/`X-Referer`.
-* Se puede ir en HTTP/1.1: el h2 no es necesario (medido).
-"""
+* `h = sha1(f"{ts} {value_of_SAPISID} {console_origin}")`, `ts` = current epoch.
+  The three hashes are EQUAL: the console uses the `SAPISID` value for all three.
+* The **mandatory** cookies are exactly 5: `SAPISID`, `SID`, `HSID`,
+  `SSID`, `APISID` (measured: with 4 of 5 -> HTTP 401).
+* **Do not send the `Origin` header**: if it is sent, the server requires `Origin`
+  and `Referer` to match -> HTTP 400 "Origin and Referer header don't match". The
+  app origin goes in `X-Origin`/`X-Referer`.
+* You can use HTTP/1.1: h2 is not necessary (measured)."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
+import re
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from .config import Config
 from .guard import (
@@ -53,14 +53,66 @@ CONSOLE_HOST = "dialogflow.clients6.google.com"
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/157.0.0.0 Safari/537.36")
 
-# Mascara de actualizacion: la misma que usa la consola al guardar una pagina.
+# ---------------------------------------------------------------- regional host
+# MEASURED (2026-11-15): the console calls a DIFFERENT host per location:
+# global      -> dialogflow.clients6.google.com
+# us-central1 -> us-central1-dialogflow.clients6.google.com
+# And the global host does **not** work for another location:
+# GET https://dialogflow.clients6.google.com/v3beta1/projects/p/locations/us-central1/agents
+# -> 400 "Please refer to .../region#avail to find the correct endpoint"
+#
+# The HEADERS do not change with the host:
+# * `authorization` (SAPISIDHASH) and `x-origin`/`x-referer` -> the CONSOLE
+#   origin, always;
+# * `referer` -> `{HOST}/static/proxy.html?usegapi=1`, with the HOST that is
+#   called. With the `referer` of the global host against a regional host:
+#   400 "Origin doesn't match Host for XD3".
+#   With `x-origin` = regional host: 401 "invalid authentication credentials".
+# => The rule is applied in ONE place: the `referer` is derived from the host of the URL.
+LOCATION_EN_PATH = re.compile(r"/locations/([^/]+)/")
+
+
+def host_para_location(location: str) -> str:
+    """The backend host that serves a location."""
+    loc = (location or "global").strip() or "global"
+    if loc == "global":
+        return CONSOLE_HOST
+    return f"{loc}-{CONSOLE_HOST}"
+
+
+def location_de_path(path: str) -> str:
+    """The location that appears in a path ('.../locations/us-central1/...')."""
+    m = LOCATION_EN_PATH.search(path or "")
+    return m.group(1) if m else ""
+
+
+def host_de_path(path: str, defecto: str = CONSOLE_HOST) -> str:
+    """The host to use for a path (derived from its location)."""
+    loc = location_de_path(path)
+    return host_para_location(loc) if loc else defecto
+
+
+# The locations that CONSOLE calls (measured on 2026-11-15 in the captured
+# traffic: 17 regional hosts + the global one). They serve the "list agents in every location" mode,
+# which is what the console does.
+LOCACIONES_CONOCIDAS: tuple[str, ...] = (
+    "global",
+    "us-central1", "us-east1", "us-west1", "us",
+    "northamerica-northeast1",
+    "europe-west1", "europe-west2", "europe-west3", "europe-west4",
+    "europe-west6", "eu",
+    "asia-northeast1", "asia-south1", "asia-southeast1", "asia-southeast2",
+    "australia-southeast1",
+)
+
+# Update mask: the same one the console uses when saving a page.
 UPDATE_MASK = (
     "name,displayName,description,entryFulfillment,form,transitionRouteGroups,"
     "agentTransitionRouteGroups,transitionRoutes,eventHandlers,advancedSettings,"
     "speakerIdSettings,etag,flow,knowledgeConnectorSettings"
 )
 
-# Campos que el servidor devuelve pero que NO se pueden (o no se deben) escribir.
+# Fields the server returns but that CANNOT (or must not) be written.
 READ_ONLY_FIELDS = frozenset({
     "etag", "derivedTransitions", "nluSettingsList", "createTime", "updateTime",
     "parent", "session", "environment",
@@ -72,22 +124,21 @@ class ConsoleApiError(RuntimeError):
 
 
 def _parse_multipart(text: str, boundary: str) -> list[dict[str, Any]]:
-    """Parte una respuesta `multipart/mixed` del endpoint `/batch`.
+    """Split a `multipart/mixed` response from the `/batch` endpoint.
 
-    Cada parte trae una respuesta HTTP embebida:
+    Each part carries an embedded HTTP response:
         Content-Type: application/http
         Content-ID: <response-1>
 
         HTTP/1.1 200 OK
         Content-Type: application/json
 
-        {"name": ...}
-    """
+        {"name": ...}"""
     out: list[dict[str, Any]] = []
     delim = "--" + boundary
     for chunk in text.split(delim)[1:]:
         chunk = chunk.lstrip("\r\n")
-        if chunk.startswith("--"):        # cierre del multipart
+        if chunk.startswith("--"):        # multipart closure
             break
         if "\r\n\r\n" not in chunk:
             continue
@@ -117,7 +168,7 @@ def sapisid_authorization(origin: str, sapisid: str, ts: int | None = None) -> s
 
 
 class ConsoleApi:
-    """Cliente del proto interno de la consola (primera parte)."""
+    """Client for the console's internal proto (first part)."""
 
     def __init__(self, cfg: Config, session: Session | None = None):
         self.cfg = cfg
@@ -126,10 +177,10 @@ class ConsoleApi:
                                         connect_timeout=cfg.connect_timeout)
         self._sapisid = cfg.sapisid
         self._cookie = cfg.cookie_header()
-        # Cache de catalogos: (kind, agent, project) -> (ts, valor)
+        # Catalog cache: (kind, agent, project) -> (ts, value)
         self._catalog: dict[tuple[str, str, str], tuple[float, Any]] = {}
 
-    # ------------------------------------------------------------- catalogos
+    # ------------------------------------------------------------- catalogs
     def _cached(self, key: tuple[str, str, str], factory) -> Any:
         now = time.time()
         hit = self._catalog.get(key)
@@ -140,14 +191,14 @@ class ConsoleApi:
         return value
 
     def invalidate(self, kind: str, agent_id: str = "") -> None:
-        """Olvida un catalogo (se llama al escribir en ese recurso)."""
+        """Forget a catalog (called when writing to that resource)."""
         for k in list(self._catalog):
             if k[0] == kind and (not agent_id or k[1] == agent_id):
                 self._catalog.pop(k, None)
 
     def flow_index(self, agent_id: str, project: str = "",
                    force: bool = False) -> tuple[dict[str, str], dict[str, str]]:
-        """(displayName->id, id->displayName) de los flows. Cacheado."""
+        """(displayName->id, id->displayName) of the flows. Cached."""
         def build() -> tuple[dict[str, str], dict[str, str]]:
             by_display = {f.get("displayName"): f["name"].split("/")[-1]
                           for f in self.list_flows(agent_id, project)
@@ -159,7 +210,7 @@ class ConsoleApi:
 
     def page_index(self, agent_id: str, flow_id: str, project: str = "",
                    force: bool = False) -> tuple[dict[str, str], dict[str, str]]:
-        """(displayName->id, id->displayName) de las paginas de un flow."""
+        """(displayName->id, id->displayName) of the pages of a flow."""
         def build() -> tuple[dict[str, str], dict[str, str]]:
             by_display = {p.get("displayName"): p["name"].split("/")[-1]
                           for p in self.list_pages(agent_id, flow_id, project)
@@ -171,12 +222,11 @@ class ConsoleApi:
 
     def playbook_index(self, agent_id: str, project: str = "",
                        force: bool = False) -> tuple[dict[str, str], dict[str, str]]:
-        """(displayName->id, id->displayName) de los playbooks. Cacheado.
+        """(displayName->id, id->displayName) of the playbooks. Cached.
 
-        OJO: el listado de playbooks del clon pesa **770 KB** (lleva goal,
-        instruction, referencedPlaybooks...). Para resolver un nombre no hace
-        falta traerlo entero, pero la API no ofrece mascara -> se cachea.
-        """
+        NOTE: the clone's playbook listing weighs **770 KB** (it carries goal,
+        instruction, referencedPlaybooks...). To resolve a name there is no
+        need to fetch it whole, but the API offers no mask -> it is cached."""
         def build() -> tuple[dict[str, str], dict[str, str]]:
             by_display = {pb.get("displayName"): pb["name"].split("/")[-1]
                           for pb in self.list_playbooks(agent_id, project)
@@ -186,13 +236,15 @@ class ConsoleApi:
             self.invalidate("playbooks", agent_id)
         return self._cached(("playbooks", agent_id, project), build)
 
-    # ------------------------------------------------------------- cabeceras
-    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+    # ------------------------------------------------------------- headers
+    def _headers(self, extra: dict[str, str] | None = None,
+                 host: str = CONSOLE_HOST) -> dict[str, str]:
         headers = {
             "accept": "*/*",
             "authorization": sapisid_authorization(self.cfg.console_origin, self._sapisid),
             "cookie": self._cookie,
-            "referer": f"https://{CONSOLE_HOST}/static/proxy.html?usegapi=1",
+            # MEASURED: the `referer` carries the HOST that is called (not the global one).
+            "referer": f"https://{host}/static/proxy.html?usegapi=1",
             "user-agent": USER_AGENT,
             "x-goog-authuser": "0",
             "x-origin": self.cfg.console_origin,
@@ -202,27 +254,35 @@ class ConsoleApi:
             headers.update(extra)
         return headers
 
-    def _url(self, path: str, **params: str) -> str:
+    def _headers_de_url(self, url: str,
+                        extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Headers with the `referer` of the HOST being called.
+
+        MEASURED (2026-11-15): with the global host's `referer` against a regional host
+        the backend responds 400 "Origin doesn't match Host for XD3"."""
+        host = urlparse(url).netloc or CONSOLE_HOST
+        return self._headers(extra, host=host)
+
+    def _url(self, path: str, host: str = "", **params: str) -> str:
         q = {"key": self.cfg.api_key}
         q.update({k: v for k, v in params.items() if v is not None})
-        return f"https://{CONSOLE_HOST}/{self.cfg.api_version}{path}?{urlencode(q)}"
+        h = host or host_de_path(path)
+        return f"https://{h}/{self.cfg.api_version}{path}?{urlencode(q)}"
 
-    def _base(self, project: str = "") -> str:
-        return (f"/projects/{project or self.cfg.project}"
-                f"/locations/{self.cfg.location}")
+    def _base(self, project: str = "", location: str = "") -> str:
+        loc = location or self.cfg.location
+        return f"/projects/{project or self.cfg.project}/locations/{loc}"
 
-    # ---------------------------------------------------------------- nucleo
+    # ---------------------------------------------------------------- core
     def request(self, method: str, url: str, body: dict[str, Any] | None = None,
                 query: dict[str, Any] | None = None, timeout: float | None = 300.0,
                 update_mask: str | None = None) -> Any:
-        """Llamada cruda al backend. `url` incluye ya la version y el path.
+        """Raw call to the backend. `url` already includes the version and the path.
 
-        **Aqui se aplica el permiso, en la capa baja**: cualquier verbo de
-        escritura pasa por `assert_writable` y cualquier lectura por
-        `assert_readable`, deducidos del agente que aparece en el path. Asi
-        ningun camino (ni siquiera el passthrough generico `cx_api`) puede
-        saltarse la lista blanca de agentes.
-        """
+        **The permission is enforced here, in the low layer**: any write verb goes through `assert_writable` and any read through
+        `assert_readable`, derived from the agent that appears in the path. Thus
+        no route (not even the generic passthrough `cx_api`) can
+        bypass the agent allowlist."""
         verb = method.upper()
         project, agent = agent_from_path(url)
         if agent:
@@ -232,7 +292,7 @@ class ConsoleApi:
                 else:
                     assert_readable(project, agent, self.cfg)
             except PermissionDeniedError as exc:
-                # La URL hace falta para saber QUE peticion se rechazo.
+                # The URL is needed to know WHICH request was rejected.
                 raise PermissionDeniedError(f"{exc} [url={url}]") from exc
         if query:
             sep = "&" if "?" in url else "?"
@@ -241,20 +301,25 @@ class ConsoleApi:
         if update_mask:
             sep = "&" if "?" in url else "?"
             url = url + sep + urlencode({"updateMask": update_mask})
-        headers = self._headers({"content-type": "application/json"} if body is not None else None)
+        headers = self._headers_de_url(
+            url, {"content-type": "application/json"} if body is not None else None)
         return self.http.json(verb, url, headers, body, timeout=timeout)
 
-    # ------------------------------------------------------------- lecturas
-    def list_agents(self, project: str = "") -> list[dict]:
-        url = self._url(f"{self._base(project)}/agents", pageSize="200")
-        data = self.http.json("GET", url, self._headers())
+    # ------------------------------------------------------------- reads
+    def list_agents(self, project: str = "", location: str = "") -> list[dict]:
+        """Project agents in a location.
+
+        MEASURED (2026-11-15): each location has its own host, so the
+        URL is built with the host that corresponds to the location."""
+        url = self._url(f"{self._base(project, location)}/agents", pageSize="200")
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("agents", [])  # type: ignore[union-attr]
 
     def list_flows(self, agent_id: str, project: str = "") -> list[dict]:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows",
                         pageSize="200", languageCode="es")
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("flows", [])  # type: ignore[union-attr]
 
     def get_flow(self, agent_id: str, flow_id: str, project: str = "",
@@ -262,13 +327,13 @@ class ConsoleApi:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows/{flow_id}",
                         languageCode=language_code)
-        return self.http.json("GET", url, self._headers())  # type: ignore[return-value]
+        return self.http.json("GET", url, self._headers_de_url(url))  # type: ignore[return-value]
 
     def list_pages(self, agent_id: str, flow_id: str, project: str = "") -> list[dict]:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows/{flow_id}/pages",
                         pageSize="200", languageCode="es")
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("pages", [])  # type: ignore[union-attr]
 
     def get_page(self, agent_id: str, flow_id: str, page_id: str,
@@ -276,12 +341,12 @@ class ConsoleApi:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows/{flow_id}/pages/{page_id}",
                         languageCode=language_code)
-        return self.http.json("GET", url, self._headers())  # type: ignore[return-value]
+        return self.http.json("GET", url, self._headers_de_url(url))  # type: ignore[return-value]
 
     def list_playbooks(self, agent_id: str, project: str = "") -> list[dict]:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/playbooks", pageSize="200")
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("playbooks", [])  # type: ignore[union-attr]
 
     def playbooks_by_display_name(self, agent_id: str, project: str = "") -> dict[str, str]:
@@ -293,7 +358,7 @@ class ConsoleApi:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/{collection}",
                         pageSize=page_size)
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get(collection, [])  # type: ignore[union-attr]
 
     def list_intents(self, agent_id: str, project: str = "") -> list[dict]:
@@ -319,7 +384,7 @@ class ConsoleApi:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/conversations",
                         pageSize=page_size)
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("conversations", [])  # type: ignore[union-attr]
 
     def get_conversation(self, agent_id: str, conversation_id: str,
@@ -327,35 +392,34 @@ class ConsoleApi:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}"
                         f"/conversations/{conversation_id}")
-        return self.http.json("GET", url, self._headers())  # type: ignore[return-value]
+        return self.http.json("GET", url, self._headers_de_url(url))  # type: ignore[return-value]
 
     def list_changelogs(self, agent_id: str, project: str = "") -> list[dict]:
         assert_readable(project or self.cfg.project, agent_id, self.cfg)
         url = self._url(f"{self._base(project)}/agents/{agent_id}/changelogs",
                         pageSize="50")
-        data = self.http.json("GET", url, self._headers())
+        data = self.http.json("GET", url, self._headers_de_url(url))
         return data.get("changelogs", [])  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------ batch
     def batch(self, requests: list[dict[str, Any]], timeout: float | None = 300.0,
               project: str = "") -> list[dict[str, Any]]:
-        """Varias llamadas a la API en UNA sola peticion HTTP (`/batch`).
+        """Multiple calls to API in a SINGLE HTTP request (`/batch`).
 
-        El descriptor de v3beta1 declara `batchPath: "batch"`: el frontend de
-        Google acepta un `multipart/mixed` con N sub-peticiones HTTP y las
-        ejecuta en el servidor. Esto convierte N viajes de ida y vuelta (cada
-        uno ~0,5 s de latencia) en uno solo.
+        The v3beta1 discovery doc declares `batchPath: "batch"`: Google's frontend
+        accepts a `multipart/mixed` with N sub-requests HTTP and
+        executes them on the server. This turns N round trips (each
+        ~0.5 s of latency) into one.
 
-        **Medido (2026-11-08):** las escrituras al MISMO agente las serializa
-        el backend (8 en paralelo = 899 ms cada una, peor que 500 ms en
-        serie), asi que el batch no las hace mas rapidas: sirve para
-        empaquetar el viaje, no para paralelizar el efecto.
+        **Measured (2026-11-08):** the backend serializes writes to the
+        SAME agent (8 in parallel = 899 ms each, worse than 500 ms in
+        series), so the batch does not make them faster: it serves to
+        package the trip, not to parallelize the effect.
 
-        Cada sub-peticion: {"method", "path", "body"?, "query"?}. `path` es
-        relativo a la version ("projects/p/locations/l/agents/a/flows").
-        La **guarda se aplica a cada sub-peticion**: un batch que mezcle
-        agentes de lectura y escritura se evalua sub a sub.
-        """
+        Each sub-request: {"method", "path", "body"?, "query"?}. `path` is
+        relative to the version ("projects/p/locations/l/agents/a/flows").
+        The **guard applies to each sub-request**: a batch that mixes
+        read and write agents is evaluated sub by sub."""
         if not requests:
             return []
         boundary = "cx_batch_boundary_3f9a"
@@ -365,7 +429,7 @@ class ConsoleApi:
             path = req.get("path") or ""
             if not path:
                 raise ConsoleApiError(f"sub-peticion {i} sin path")
-            # La guarda, sub a sub: nadie se cuela por el batch.
+            # The guard, sub by sub: nobody slips through via the batch.
             project_r, agent_r = agent_from_path(path)
             if agent_r:
                 if method in WRITE_VERBS:
@@ -388,14 +452,15 @@ class ConsoleApi:
                 f"{payload}\r\n"
             )
         payload_bytes = ("".join(chunks) + f"--{boundary}--\r\n").encode("utf-8")
-        headers = self._headers({"content-type": f"multipart/mixed; boundary={boundary}"})
         url = f"https://{CONSOLE_HOST}/{self.cfg.api_version}/batch?key={self.cfg.api_key}"
+        headers = self._headers_de_url(
+            url, {"content-type": f"multipart/mixed; boundary={boundary}"})
         status, text = self.http.request("POST", url, headers, payload_bytes,
                                          timeout=timeout)
         if status >= 400:
             raise HttpStatusError(status, text)
         if text.lstrip().startswith("{"):
-            # El servidor respondio con el formato JSON de ESF.
+            # The server responded with the JSON format from ESF.
             try:
                 data = json.loads(text)
             except ValueError:
@@ -409,16 +474,15 @@ class ConsoleApi:
 
     def batch_secundario(self, requests: list[dict[str, Any]],
                          project: str = "", hilos: int = 8) -> list[dict[str, Any]]:
-        """Rodeo de `batch()`: las sub-peticiones, en HILOS.
+        """Workaround for `batch()`: the sub-peticiones, in THREADS.
 
-        **Medido (2026-11-08):** el backend interno NO implementa `/batch`
-        (HTTP 404: el descriptor lo declara, pero clients6 no lo sirve). Este
-        metodo hace las mismas llamadas N en paralelo (hilos), que es lo que
-        el batch pretendia: un viaje por sub-peticion, pero a la vez.
+        **Measured (2026-11-08):** the internal backend does NOT implement `/batch`
+        (HTTP 404: the discovery doc declares it, but clients6 does not serve it). This
+        method makes the same N calls in parallel (threads), which is what
+        the batch intended: one trip per sub-peticion, but at the same time.
 
-        OJO: el backend serializa las ESCRITURAS del mismo agente, asi que
-        el paralelismo solo compensa en las LECTURAS.
-        """
+        NOTE: the backend serializes the WRITES of the same agent, so
+        parallelism only pays off in the READS."""
         from concurrent.futures import ThreadPoolExecutor
 
         def uno(req: dict[str, Any]) -> dict[str, Any]:
@@ -426,12 +490,14 @@ class ConsoleApi:
             path = req.get("path") or ""
             q = {"key": self.cfg.api_key}
             q.update({k: v for k, v in (req.get("query") or {}).items() if v is not None})
-            # URL ABSOLUTA: el cliente HTTP resuelve el host (una ruta
-            # relativa -> gaierror "No address associated with hostname").
-            url = (f"https://{CONSOLE_HOST}/{self.cfg.api_version}/"
+            # URL ABSOLUTE: the HTTP client resolves the host (a relative
+            # route -> gaierror "No address associated with hostname").
+            # MEASURED: the host depends on the path location.
+            url = (f"https://{host_de_path(path)}/{self.cfg.api_version}/"
                    f"{path.lstrip('/')}?{urlencode(q)}")
-            headers = self._headers({"content-type": "application/json"}
-                                    if req.get("body") is not None else None)
+            headers = self._headers_de_url(
+                url, {"content-type": "application/json"}
+                if req.get("body") is not None else None)
             try:
                 data = self.http.json(method, url, headers, req.get("body"), timeout=300.0)
                 return {"status": 200, "data": data}
@@ -442,7 +508,7 @@ class ConsoleApi:
         with ThreadPoolExecutor(max_workers=min(hilos, len(requests))) as pool:
             return list(pool.map(uno, requests))
 
-    # ------------------------------------------------------------- escritura
+    # ------------------------------------------------------------- write
     def patch_page(self, agent_id: str, flow_id: str, page_id: str,
                    body: dict[str, Any], update_mask: str = UPDATE_MASK,
                    language_code: str | None = "es", project: str = "",
@@ -451,30 +517,29 @@ class ConsoleApi:
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows/{flow_id}"
                         f"/pages/{page_id}",
                         alt="json", updateMask=update_mask, languageCode=language_code)
-        headers = self._headers({"content-type": "application/json"})
+        headers = self._headers_de_url(url, {"content-type": "application/json"})
         return self.http.json("PATCH", url, headers, body, timeout=timeout)  # type: ignore[return-value]
 
     def patch_flow(self, agent_id: str, flow_id: str, body: dict[str, Any],
                    update_mask: str | None = None, language_code: str | None = "es",
                    project: str = "", timeout: float | None = 300.0) -> dict:
-        """PATCH de un flow. La mascara sale de las claves del cuerpo si no se pasa."""
+        """PATCH of a flow. The mask comes from the body keys if not passed."""
         assert_writable(project or self.cfg.project, agent_id, self.cfg)
         if not update_mask:
             update_mask = ",".join(sorted(k for k in body if k not in READ_ONLY_FIELDS))
         url = self._url(f"{self._base(project)}/agents/{agent_id}/flows/{flow_id}",
                         alt="json", updateMask=update_mask, languageCode=language_code)
-        headers = self._headers({"content-type": "application/json"})
+        headers = self._headers_de_url(url, {"content-type": "application/json"})
         return self.http.json("PATCH", url, headers, body, timeout=timeout)  # type: ignore[return-value]
 
     def set_transition_routes(self, agent_id: str, flow_id: str, page_id: str,
                               routes: list[dict], timeout: float | None = 300.0,
                               project: str = "") -> dict:
-        """Escribe la lista COMPLETA de transition routes de una pagina.
+        """Write the COMPLETE list of transition routes for a page.
 
-        Es lo que hace la consola: manda el array entero en el PATCH. El `etag`
-        se omite a proposito: el GET interno no lo devuelve y un etag viejo
-        haria fallar el PATCH.
-        """
+        This is what the console does: it sends the whole array in the PATCH. The `etag`
+        is deliberately omitted: the internal GET does not return it and a stale etag
+        would make the PATCH fail."""
         page = self.get_page(agent_id, flow_id, page_id, project=project)
         body = {
             "name": page.get("name"),
@@ -488,7 +553,7 @@ class ConsoleApi:
     def set_route_playbook(self, agent_id: str, flow_id: str, page_id: str,
                            route_ref: str | int, playbook_resource: str,
                            timeout: float | None = 300.0, project: str = "") -> dict:
-        """Pone un playbook como destino de UNA transition route DE PAGINA."""
+        """Set a playbook as the target of ONE transition route FROM PAGE."""
         from .routing import find_route
 
         page = self.get_page(agent_id, flow_id, page_id, project=project)
@@ -527,21 +592,20 @@ class ConsoleApi:
             ),
         }
 
-    # ------------------------------------------- EL AGREGADO: router de un flow
+    # ------------------------------------------- THE AGGREGATE: router of a flow
     def patch_resource(self, name: str, body: dict[str, Any],
                        update_mask: str | None = None, language_code: str | None = None,
                        project: str = "", timeout: float | None = 300.0) -> dict:
-        """PATCH GENERICO de cualquier recurso, addressed por su `name`.
+        """PATCH GENERIC of any resource, addressed by its `name`.
 
-        `name` es el `name` completo que devuelve la API
-        (`projects/p/locations/l/agents/a/flows/f/pages/p`). Con esto el MCP
-        puede escribir en cualquier recurso del agente (agente, flow, pagina,
-        playbook, tool, intent, entity type, webhook, grupo de rutas...) sin
-        un metodo por recurso.
+        `name` is the complete `name` returned by the API
+        (`projects/p/locations/l/agents/a/flows/f/pages/p`). With this the MCP
+        can write to any resource of the agent (agent, flow, page,
+        playbook, tool, intent, entity type, webhook, route group...) without
+        one method per resource.
 
-        Si no se pasa `update_mask`, sale de las claves del cuerpo (menos los
-        campos derivados). Si no se pasa `language_code`, no se manda.
-        """
+        If `update_mask` is not passed, it comes from the body keys (minus the
+        derived fields). If `language_code` is not passed, it is not sent."""
         assert_writable(*agent_from_path(name), self.cfg)
         if not update_mask:
             update_mask = ",".join(sorted(k for k in body if k not in READ_ONLY_FIELDS))
@@ -549,27 +613,26 @@ class ConsoleApi:
         if language_code:
             params["languageCode"] = language_code
         url = self._url("/" + name, **params)
-        headers = self._headers({"content-type": "application/json"})
+        headers = self._headers_de_url(url, {"content-type": "application/json"})
         return self.http.json("PATCH", url, headers, body, timeout=timeout)  # type: ignore[return-value]
 
     @staticmethod
     def _agent_of_name(name: str) -> str:
-        """El id del agente que aparece en el `name` de un recurso."""
+        """The agent id that appears in the `name` of a resource."""
         return agent_from_path(name)[1]
 
     def set_flow_route_playbook(self, agent_id: str, flow_id: str,
                                 route_ref: str | int, playbook_resource: str,
                                 timeout: float | None = 300.0, project: str = "") -> dict:
-        """Pone un playbook como destino de UNA transition route DE FLOW.
+        """Set a playbook as the target of ONE transition route FROM FLOW.
 
-        Esto es lo que la API publica NO puede expresar: `TransitionRoute.target`
-        es un `oneof` con `target_page` y `target_flow`; `target_playbook` no
-        existe y un PATCH que lo envie se descarta en silencio. El backend
-        interno de la consola si lo conserva (medido: persiste y se lee).
+        This is what the API publishes CANNOT express: `TransitionRoute.target`
+        is a `oneof` with `target_page` and `target_flow`; `target_playbook` does not
+        exist and a PATCH that sends it is silently dropped. The console's
+        internal backend does keep it (measured: persists and is read back).
 
-        Escribe el array COMPLETO de rutas del flow (igual que la consola) y
-        verifica releyendo.
-        """
+        Write the flow's COMPLETE array of routes (same as the console) and
+        verify by re-reading."""
         from .routing import find_route
 
         flow = self.get_flow(agent_id, flow_id, project=project)
@@ -584,8 +647,8 @@ class ConsoleApi:
 
         body = {k: v for k, v in flow.items() if k not in READ_ONLY_FIELDS}
         body["transitionRoutes"] = new_routes
-        # Mascara estrecha: solo se escribe `transitionRoutes`; el resto del
-        # flow no se toca (medido: el resto sobrevive al PATCH).
+        # Narrow mask: only `transitionRoutes` is written; the rest of the
+        # flow is untouched (measured: the rest survives the PATCH).
         self.patch_flow(agent_id, flow_id, body, update_mask="transitionRoutes",
                         timeout=timeout, project=project)
 

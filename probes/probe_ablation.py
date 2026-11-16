@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""ABLASION: que cabeceras son realmente necesarias para que el backend
-interno acepte la llamada de primera parte (HTTP puro, sin navegador).
+"""ABLATION: which headers are really needed for the internal backend
+to accept the first party call (pure HTTP, no browser).
 
-Reproduce una peticion que SI funciono (200 en el navegador) quitando grupos
-de cabeceras y viendo en cuales cae a 401.
+It replays a request that DID work (200 in the browser) removing groups of
+headers and seeing in which ones it falls to 401.
 """
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import time
@@ -17,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agente, targets_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
 ORIG = agente("por_defecto")
@@ -91,40 +90,40 @@ def main() -> int:
     )
     time.sleep(3)
     if not wire:
-        print("== no se capturaron cabeceras")
+        print("== no headers were captured")
         return 1
     base = {k: v for k, v in wire[-1].items() if not k.startswith(":")}
-    print(f"== cabeceras base: {len(base)}\n")
+    print(f"== base headers: {len(base)}\n")
 
-    # ts fresco en cada intento (el hash depende del ts)
+    # fresh ts on every attempt (the hash depends on the ts)
     def fresh(h: dict[str, str]) -> dict[str, str]:
         h = dict(h)
         h["authorization"] = sapisid_authorization(cfg.console_origin, live.get("SAPISID"), int(time.time()))
         return h
 
     code, body = curl(fresh(base), url)
-    print(f"A) COMPLETAS                       -> HTTP {code}")
+    print(f"A) COMPLETE                       -> HTTP {code}")
 
     for nombre, claves in GROUPS.items():
         h = {k: v for k, v in base.items() if k not in claves}
         code, body = curl(fresh(h), url)
-        print(f"B) sin {nombre:28s} -> HTTP {code}")
+        print(f"B) without {nombre:28s} -> HTTP {code}")
 
-    # minimo: solo lo imprescindible
+    # minimum: only the essentials
     minimo = {k: base[k] for k in (
         "accept", "authorization", "cookie", "referer", "user-agent",
         "x-goog-authuser", "x-origin", "x-referer", "x-browser-validation",
     ) if k in base}
     code, body = curl(fresh(minimo), url)
-    print(f"C) MINIMO (9 cabeceras)             -> HTTP {code}")
+    print(f"C) MINIMUM (9 headers)             -> HTTP {code}")
 
-    # minimo + http1.1
+    # minimum + http1.1
     Path("/tmp/abl.txt").write_text("\n".join(f"{k}: {v}" for k, v in fresh(minimo).items()),
                                     encoding="utf-8")
     r = subprocess.run(["curl", "-sS", "--compressed", "--http1.1", "-o", "/tmp/abl_out.json",
                         "-w", "%{http_code}", "-H", "@/tmp/abl.txt", url],
                        capture_output=True, text=True, timeout=90)
-    print(f"D) MINIMO con HTTP/1.1             -> HTTP {r.stdout.strip()}")
+    print(f"D) MINIMUM with HTTP/1.1             -> HTTP {r.stdout.strip()}")
     return 0
 
 

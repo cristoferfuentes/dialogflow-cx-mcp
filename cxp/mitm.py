@@ -1,28 +1,27 @@
-"""Proxy local que TERMINA el TLS (MITM) para que el navegador pueda salir.
+"""Local proxy that ENDS the TLS (MITM) so the browser can get out.
 
-Por que hace falta (medido en esta maquina):
+Why it is needed (measured on this machine):
 
-* `curl` y Python **si** hacen TLS con Google (1,8 s). Los navegadores
-  (Chromium **y** Firefox) **no**: el `TCP connect` se completa
-  (`is_usable=true`), el navegador envia su ClientHello (1.820 B) y el servidor
-  responde (1.757 B quedan en el buffer del kernel) pero el navegador **nunca
-  lee** la respuesta -> timeout. Descartado: certificado (curl verifica OK con
-  el mismo), QUIC, ECH, post-quantum, MTU de la interfaz, proxy CONNECT,
-  Chromium (Firefox falla igual), `/etc/hosts`.
+* `curl` and Python **do** complete TLS with Google (1.8 s). Browsers
+  (Chromium **and** Firefox) **do not**: the `TCP connect` completes
+  (`is_usable=true`), the browser sends its ClientHello (1,820 B) and the server
+  responds (1,757 B remain in the kernel buffer) but the browser **never
+  reads** the response -> timeout. Dropped: certificate (curl verifies OK with
+  the same one), QUIC, ECH, post-quantum, MTU of the interface, CONNECT proxy,
+  Chromium (Firefox fails the same), `/etc/hosts`.
 
-Como el problema es del **TLS del navegador**, la solucion es que el navegador
-**no haga TLS con internet**: habla TLS con este proxy (localhost, que si
-funciona) y el proxy habla TLS con Google usando Python (que si funciona).
+Since the problem is in the browser's **TLS**, the solution is for the browser
+**not to do TLS with the internet**: it speaks TLS with this proxy (localhost, which does
+work) and the proxy speaks TLS with Google using Python (which does work).
 
-El proxy:
-1. acepta `CONNECT host:443`;
-2. abre el tunel TLS contra el host real (con clamp de MSS);
-3. termina el TLS del cliente con un certificado local;
-4. reenvia peticiones/respuestas en HTTP/1.1;
-5. inyecta `Authorization: SAPISIDHASH ...` hacia el backend de la consola,
-   calculada con la cookie `__Secure-3PSID` que envia el propio navegador (esa
-   cookie es HttpOnly: solo el proxy puede verla).
-"""
+The proxy:
+1. accepts `CONNECT host:443`;
+2. opens the TLS tunnel against the real host (with MSS clamp);
+3. terminates the client's TLS with a local certificate;
+4. forwards peticiones/respuestas in HTTP/1.1;
+5. injects `Authorization: SAPISIDHASH ...` toward the console backend,
+   computed with the `__Secure-3PSID` cookie that the browser itself sends (that
+   cookie is HttpOnly: only the proxy can see it)."""
 from __future__ import annotations
 
 import hashlib
@@ -43,11 +42,11 @@ def _log(msg: str) -> None:
 
 MSS = 1200
 BUF = 65536
-# NO se elimina ninguna cabecera al reenviar. Medido: quitar `connection`
-# hacia el upstream hacia que la 2ª peticion de la misma conexion (el redirect
-# a /ServiceLogin del login de Google) se enviara pero el servidor no
-# respondiera nunca -> la navegacion se colgaba. La peticion se reenvia tal
-# cual, solo se le AÑADEN las cabeceras de autorizacion.
+# No header is removed on forwarding. Measured: removing `connection`
+# toward the upstream caused the 2nd request on the same connection (the redirect
+# to /ServiceLogin of the Google login) to be sent but the server never
+# responded -> navigation hung. The request is forwarded as
+# is, only the authorization headers are ADD on it.
 HOP_BY_HOP: set[str] = set()
 
 
@@ -61,17 +60,16 @@ CA_TRUST_PATH = Path("/usr/local/share/ca-certificates/cx-playbook-proxy-ca.crt"
 
 
 def ensure_ca(dirpath: Path) -> tuple[Path, Path]:
-    """Crea (o reutiliza) una CA local y la instala en el trust store del sistema.
+    """Create (or reuse) a local CA and install it in the system trust store.
 
-    Sin esto, el certificado que presenta el proxy es un autofirmado y el
-    navegador marca el origen como **"Not secure"**: Google exige un contexto
-    seguro para el login (cookie `__Secure-3PSID`) y se queda pegado en la
-    pantalla del correo.
+    Without this, the certificate presented by the proxy is self-signed and the
+    browser flags the origin as **"Not secure"**: Google requires a secure
+    context for login (cookie `__Secure-3PSID`) and gets stuck on the
+    email screen.
 
-    Con la CA instalada en `/usr/local/share/ca-certificates` + `update-ca-certificates`,
-    el certificado por host (con el SAN correcto) valida de verdad: candado
-    verde y el login funciona.
-    """
+    With the CA installed in `/usr/local/share/ca-certificates` + `update-ca-certificates`,
+    the per-host certificate (with the correct SAN) actually validates: green
+    padlock and login works."""
     ca_dir = dirpath / CA_DIR_NAME
     ca_dir.mkdir(parents=True, exist_ok=True)
     key, crt = ca_dir / "ca.key", ca_dir / "ca.crt"
@@ -92,7 +90,7 @@ def ensure_ca(dirpath: Path) -> tuple[Path, Path]:
 
 
 def _install_ca_in_trust_store(crt: Path) -> None:
-    """Copia la CA al trust store del sistema y la registra (idempotente)."""
+    """Copy the CA to the system trust store and register it (idempotent)."""
     try:
         target = CA_TRUST_PATH
         if target.exists() and target.read_bytes() == crt.read_bytes():
@@ -106,7 +104,7 @@ def _install_ca_in_trust_store(crt: Path) -> None:
 
 
 def ensure_certificate(dirpath: Path, hosts: list[str]) -> tuple[Path, Path]:
-    """Certificado local autofirmado para los hosts que proxieamos."""
+    """Self-signed local certificate for the hosts we proxy."""
     dirpath.mkdir(parents=True, exist_ok=True)
     key, crt = dirpath / "proxy.key", dirpath / "proxy.crt"
     if key.exists() and crt.exists():
@@ -124,16 +122,15 @@ def ensure_certificate(dirpath: Path, hosts: list[str]) -> tuple[Path, Path]:
 
 
 def certificate_for_host(dirpath: Path, host: str) -> tuple[Path, Path]:
-    """Certificado **por host**, firmado por la CA local.
+    """Certificate **per host**, signed by the local CA.
 
-    Es imprescindible para el login: el SSO corporativo redirige a un IdP que
-    no es de Google (p.ej. `*.miempresa.cl`) y el proxy tiene que poder
-    terminar tambien ese TLS.
+    It is essential for login: the corporate SSO redirects to an IdP that
+    is not Google's (p.ej. `*.miempresa.cl`) and the proxy must also be able to
+    terminate that TLS.
 
-    Al firmarlo la CA (instalada en el trust store del sistema), el navegador
-    lo valida de verdad: el origen pasa a ser **seguro** y Google acepta el
-    flujo de login (con un autofirmado se queda en "Not secure").
-    """
+    When the CA signs it (installed in the system trust store), the browser
+    actually validates it: the origin becomes **secure** and Google accepts the
+    login flow (with a self-signed one it stays at "Not secure")."""
     dirpath = dirpath / "hosts"
     dirpath.mkdir(parents=True, exist_ok=True)
     safe = host.replace("*", "_").replace("/", "_")
@@ -165,14 +162,13 @@ def certificate_for_host(dirpath: Path, host: str) -> tuple[Path, Path]:
 
 
 def _upstream_tls(host: str, port: int, timeout: float = 45.0) -> ssl.SSLSocket:
-    """Abre el tunel TLS contra el host real.
+    """Open the TLS tunnel against the real host.
 
-    El MSS se fija **ANTES** del connect: despues no sirve (el MSS ya se
-    negocio en el SYN). Con `TCP_MAXSEG` puesto antes, el SYN anuncia 1200 y
-    los segmentos no se fragmentan en el tunel ESP.
-    """
+    The MSS is set **BEFORE** from connect: afterwards it is useless (the MSS was
+    already negotiated in the SYN). With `TCP_MAXSEG` set beforehand, the SYN advertises 1200 and
+    the segments are not fragmented in the ESP tunnel."""
     ctx = ssl.create_default_context()
-    ctx.set_alpn_protocols(["http/1.1"])  # HTTP/1.1: permite inyectar cabeceras
+    ctx.set_alpn_protocols(["http/1.1"])  # HTTP/1.1: allows injecting headers
     raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     raw.settimeout(timeout)
     try:
@@ -183,7 +179,7 @@ def _upstream_tls(host: str, port: int, timeout: float = 45.0) -> ssl.SSLSocket:
         raw.connect((host, port))
     except OSError:
         raw.close()
-        # Reintento sin el clamp (por si el setsockopt previo rompe el SYN).
+        # Retry without the clamp (in case the previous setsockopt breaks the SYN).
         raw = socket.create_connection((host, port), timeout=timeout)
     return ctx.wrap_socket(raw, server_hostname=host)
 
@@ -195,33 +191,32 @@ def _inject_auth(
     bearer_token: str | None = None,
     bearer_hosts: set[str] | None = None,
 ) -> bytes:
-    """Anade `Authorization` a las peticiones del navegador.
+    """Add `Authorization` to browser requests.
 
-    Prioridad:
-      1. `SAPISIDHASH` si el navegador tiene cookie de sesion de Google
-         (primera parte / UDS, que es lo que usa la consola de verdad).
-      2. `Bearer <token ADC>` para los hosts del backend de la consola si no
-         hay cookie de sesion. Asi la consola se puede automatizar SIN login
-         de Google: `dialogflow.clients6.google.com` tambien acepta el token
-         OAuth estandar (medido: GET de agents en 1,07 s).
+    Priority:
+      1. `SAPISIDHASH` if the browser has a Google session cookie
+         (first part / UDS, which is what the console actually uses).
+      2. `Bearer <token ADC>` for console backend hosts if there is no
+         session cookie. This way the console can be automated WITHOUT Google
+         login: `dialogflow.clients6.google.com` also accepts the standard
+         OAuth token (measured: GET of agents in 1.07 s).
 
-    Solo toca el paquete que **abre** una petición HTTP (request-line valida).
-    Un body que empieza por "GET " no se confunde con una peticion nueva.
-    """
+    Only touches the package that **opens** a HTTP request (request-line validates).
+    A body that starts with "GET " is not mistaken for a new request."""
     if not data.startswith((b"GET ", b"POST ", b"PATCH ", b"PUT ", b"DELETE ", b"HEAD ")):
         return data
     head, sep, rest = data.partition(b"\r\n\r\n")
     if not sep:
         return data
     lines = head.split(b"\r\n")
-    # La request-line debe ser "<METHOD> <path> HTTP/1.1"; si no, es un body.
+    # The request-line must be "<METHOD> <path> HTTP/1.1"; otherwise it is a body.
     parts = lines[0].split()
     if len(parts) != 3 or not parts[2].startswith(b"HTTP/"):
         return data
-    # El preflight CORS (OPTIONS) NO se autentica: si se le anade un
-    # `Authorization` que el navegador no pidio, el navegador rechaza la
-    # respuesta del preflight y la XHR nunca se lanza (medido: la consola se
-    # queda en blanco al pedir el agente).
+    # The CORS preflight (OPTIONS) does NOT authenticate: if a
+    # `Authorization` the browser did not request is added, the browser rejects the
+    # preflight response and the XHR is never sent (measured: the console
+    # stays blank when requesting the agent).
     if parts[0].upper() == b"OPTIONS":
         return data
     headers: dict[str, str] = {}
@@ -230,7 +225,7 @@ def _inject_auth(
             k, _, v = line.partition(b":")
             headers[k.decode().strip().lower()] = v.decode().strip()
     if headers.get("authorization"):
-        return data  # ya esta autenticada: no se toca
+        return data  # already authenticated: left untouched
     sapisid = None
     for part in headers.get("cookie", "").split(";"):
         k, _, v = part.strip().partition("=")
@@ -256,7 +251,7 @@ def _inject_auth(
 
 
 class MitmProxy:
-    """Proxy MITM local sobre sockets crudos (arranca en un hilo)."""
+    """Local MITM proxy over raw sockets (starts on a thread)."""
 
     def __init__(
         self,
@@ -296,7 +291,7 @@ class MitmProxy:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
-    # ------------------------------------------------------------- interno
+    # ------------------------------------------------------------- internal
     def _accept_loop(self):
         while not self._stop:
             try:
@@ -326,13 +321,12 @@ class MitmProxy:
             conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             _log(f"CONNECT {host}:{port}")
 
-            # Certificado por host: asi el SSO corporativo (IdP que no es de
-            # Google) tambien puede hacer TLS a traves del proxy.
+            # Per-host certificate: this way the corporate SSO (non-Google IdP) can also do TLS through the proxy.
             key, crt = certificate_for_host(self.cert_dir, host)
             server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             server_ctx.load_cert_chain(str(crt), str(key))
-            # ALPN explicito: el navegador debe hablar HTTP/1.1 con el proxy
-            # (si no, intenta h2 y el relay HTTP/1.1 no lo entiende).
+            # Explicit ALPN: the browser must speak HTTP/1.1 to the proxy
+            # (otherwise it tries h2 and the HTTP/1.1 relay does not understand it).
             try:
                 server_ctx.set_alpn_protocols(["http/1.1"])
             except NotImplementedError:
@@ -346,8 +340,8 @@ class MitmProxy:
             _log(f"tls upstream ok {host} alpn={upstream.selected_alpn_protocol()}")
             self._relay(client_tls, upstream, host)
         except (OSError, ssl.SSLError, ValueError) as exc:
-            # NO se traga en silencio: si el TLS con el upstream falla, la
-            # peticion del navegador se queda colgada sin explicacion.
+            # It does NOT swallow silently: if the TLS with the upstream fails, the
+            # browser request hangs with no explanation.
             _log(f"ERROR en {host}: {type(exc).__name__}: {exc}")
         finally:
             for s in (conn, upstream):
@@ -358,21 +352,20 @@ class MitmProxy:
                     pass
 
     def _relay(self, client: ssl.SSLSocket, upstream: ssl.SSLSocket, host: str):
-        """Relay bidireccional: **un hilo por direccion**, sockets bloqueantes.
+        """Bidirectional relay: **one thread per direction**, blocking sockets.
 
-        Por que dos hilos y no `select`:
-        con sockets no bloqueantes + `select` hay tres formas de perder bytes
-        (medido: la 2ª respuesta HTTP llegaba corrupta, `00000001` en vez de la
+        Why two threads and not `select`:
+        with non-blocking sockets + `select` there are three ways to lose bytes
+        (measured: the 2nd HTTP response arrived corrupted, `00000001` instead of the
         status line):
-          * `select` dice "no legible" pero el socket TLS ya tiene datos
-            descifrados en su buffer interno (típico con GRO activo);
-          * `SSLWantReadError` en `recv` se come un registro TLS a medias;
-          * `send()` parcial deja datos en un `pending` que `select` (que solo
-            esperaba lectura) no vuelve a despertar.
-        Con `recv`/`sendall` **bloqueantes** y un hilo por sentido, el orden y
-        la integridad los garantiza el kernel. Ademas `sendall` no devuelve
-        hasta que se ha escrito todo.
-        """
+          * `select` says "no legible" but the TLS socket already has decrypted
+            data in its internal buffer (typical with GRO active);
+          * `SSLWantReadError` on `recv` swallows a half-read TLS record;
+          * partial `send()` leaves data in a `pending` that `select` (which only
+            expected a read) does not wake again.
+        With **blocking** `recv`/`sendall` and one thread per direction, order and
+        integrity are guaranteed by the kernel. Also `sendall` does not return
+        until everything has been written."""
         client.settimeout(120)
         upstream.settimeout(120)
         counters = {"c2u": 0, "u2c": 0}

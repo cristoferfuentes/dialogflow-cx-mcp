@@ -1,70 +1,76 @@
-# Cómo contribuir
+# Contributing
 
-Gracias por querer ayudar. Esto es un MCP pequeño: el valor está en que **todo
-lo que dice está medido**, no supuesto.
+Thanks for wanting to help. This is a small MCP: its value is that **everything it
+claims is measured**, not assumed.
 
-## Regla de oro: lo que afirmes, mídelo
+## Golden rule: if you claim it, measure it
 
-Cada afirmación sobre el comportamiento de la API (un error concreto, un límite,
-un campo que "no se puede escribir") debe venir de **una ejecución real**, no de
-la documentación ni de la memoria. Si no lo has medido, no lo escribas.
+Every claim about the API's behaviour (a specific error, a limit, a field that "cannot
+be written") must come from **a real execution**, not from documentation or memory. If
+you did not measure it, do not write it.
 
-## Cómo medir
+## How to measure
 
-Las sondas de `probes/` son elinstrumento. Las que produjeron las mediciones
-publicadas son:
+The probes in `probes/` are the instrument. The ones that produced the published
+measurements are:
 
-| sonda | qué mide |
+| probe | what it measures |
 |---|---|
-| `probes/probe_schema_gaps.py` | qué campos devuelve el backend que el esquema público no declara |
-| `probes/probe_console_only_writable.py` | qué campos fuera de esquema **conserva** el servidor al escribir |
-| `probes/probe_console_only_writable3.py` | la matriz final (usa el código de producción: `cxp.console_fields.set_field`) |
-| `probes/test_herramientas_nuevas.py` | las herramientas nuevas, de punta a punta |
+| `probes/probe_schema_gaps.py` | which fields the backend returns that the public schema does not declare |
+| `probes/probe_console_only_writable.py` | which out-of-schema fields the server **keeps** when written |
+| `probes/probe_console_only_writable3.py` | the final matrix (uses production code: `cxp.console_fields.set_field`) |
+| `probes/test_herramientas_nuevas.py` | the new tools, end to end |
 
-Los ids de agente **no se cablean**: salen del entorno.
+Agent ids are **never hardcoded**: they come from the environment.
 
 ```bash
-export CXP_PROBE_AGENTS="por_defecto=<uuid>"
-export CXP_PROBE_TARGETS="por_defecto=<agente>,<flow>,<pagina>"
+export CXP_PROBE_AGENTS="default=<uuid>"
+export CXP_PROBE_TARGETS="default=<agent>,<flow>,<page>"
 .venv/bin/python probes/probe_schema_gaps.py
 ```
 
-**Regla dura al medir:** escribe solo en un agente de `CXP_AGENT_READWRITE`
-(una copia tuya). Nunca en un agente de referencia ni en el de producción: se
-rompería la paridad con la consola. Crea recursos temporales y bórralos.
+**Hard rule when measuring:** write only to an agent in `CXP_AGENT_READWRITE` (your own
+copy). Never to a reference agent nor to the production one: it would break parity with
+the console. Create temporary resources and delete them.
 
-## Antes de abrir un PR
+## Before opening a PR
 
 ```bash
-pytest                  # tests unitarios (sin red)
-python smoke_test.py    # prueba de punta a punta (necesita credenciales)
+pytest                  # unit tests (no network)
+python smoke_test.py    # end-to-end test (needs credentials)
 ruff check cxp server.py tests
 ```
 
-* Los **tests unitarios** no pueden tocar la red. Si tu cambio necesita
-  verificar algo del backend, va en `probes/`, no en `tests/`.
-* El **smoke test** debe seguir siendo genérico: no puede tener ids de agente,
-  flows ni playbooks cableados, ni conteos fijos.
-* Si tocas una capa, el smoke test tiene que **llamar a cada herramienta** que
-  use esa capa.
+* The **unit tests** must not touch the network. If your change needs to verify
+  something about the backend, it goes in `probes/`, not in `tests/`.
+* The **smoke test** must stay generic: no hardcoded agent, flow nor playbook ids, and
+  no fixed counts.
+* If you touch a layer, the smoke test has to **call every tool** that uses that layer.
 
-## Estilo
+## Style
 
-* Código y comentarios en **español** (es lo que usa el resto del repo).
-* Los docstrings de las herramientas MCP son su **API**: explica qué hace, qué
-  parámetros tiene y qué errores puede dar.
-* Sin dependencias nuevas sin motivo: el MCP funciona solo con `mcp`.
+* Code, comments and docstrings are in **English**.
+* The MCP tool docstrings are its **API**: explain what it does, which parameters it
+  takes and which errors it can raise.
+* No new dependencies without a reason: the MCP works with `mcp` alone.
 
-## Al añadir un límite o un hueco
+## When adding a limit or a gap
 
-1. Mídelo (sonda) y anota el **síntoma exacto** que devuelve el servidor.
-2. Añádelo a `cxp/limits.py` (límite) o a `cxp/gaps.py` (hueco), con su causa y
-   su rodeo.
-3. Si es un hueco, di **si se puede escribir** (estado `escribible` /
-   `derivado` / `solo_lectura`): es la información que más valor da.
+1. Measure it (with a probe) and note the **exact symptom** the server returns.
+2. Add it to `cxp/limits.py` (limit) or to `cxp/gaps.py` (gap), with its cause and its
+   workaround.
+3. If it is a gap, state **whether it can be written** (state `escribible` /
+   `derivado` / `solo_lectura`): that is the information with the most value.
 
-## Seguridad
+## Security
 
-* **Nunca** subas un `.env`, cookies, un `storage_state` ni un id de agente real
-  a un PR.
-* Las cookies de sesión son credenciales: trátalas como una contraseña.
+* **Never** push a `.env`, cookies, a `storage_state` or a real agent id to a PR.
+* Session cookies are credentials: treat them like a password.
+* If you find a security problem, do not open a public issue: see
+  [SECURITY.md](SECURITY.md).
+
+## Translations
+
+The project documentation lives in English. If you want to help with another language,
+open an issue first so we can agree on where the translated files live (the repository
+keeps a single source of truth for now).

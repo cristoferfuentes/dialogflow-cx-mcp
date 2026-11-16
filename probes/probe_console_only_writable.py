@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Sonda: que campos "fuera de esquema" se pueden ESCRIBIR de verdad.
+"""Probe: which "out of schema" fields can really be WRITTEN.
 
-Reglas:
-- SOLO se escribe en el agente escribible (el clon).
-- Cada prueba usa un recurso TEMPORAL (flow/pagina/tool/entityType/intent) que
-  se borra al final, salvo los de nivel agente, que se revierten en el acto.
-- Cada escritura se verifica releyendo y se revierte.
+Rules:
+- It writes ONLY on the writable agent (the clone).
+- Each test uses a TEMPORARY resource (flow/page/tool/entityType/intent) that
+  is deleted at the end, except the agent-level ones, which are reverted on the spot.
+- Each write is verified by re-reading it and is reverted.
 """
 from __future__ import annotations
 
@@ -62,22 +62,22 @@ def main() -> int:
             leido = leer_en(ruta, after)
             ok = leido == valor
             RESULTADOS.append((etiqueta, ok, json.dumps(leido, ensure_ascii=False)[:120]))
-            print(f"  [{'OK ' if ok else 'NO '}] {etiqueta}  -> leido={json.dumps(leido, ensure_ascii=False)[:100]}")
+            print(f"  [{'OK ' if ok else 'NO '}] {etiqueta}  -> read={json.dumps(leido, ensure_ascii=False)[:100]}")
             if not ok:
-                print("        respuesta:", json.dumps(respuesta, ensure_ascii=False)[:220])
+                print("        response:", json.dumps(respuesta, ensure_ascii=False)[:220])
             if revertir:
                 patch(nombre, before, mascara)
         except Exception as exc:
             RESULTADOS.append((etiqueta, False, f"{type(exc).__name__}: {exc}"))
             print(f"  [ERR] {etiqueta}: {str(exc)[:220]}")
 
-    # ---------------------------------------------------------------- temporales
+    # ---------------------------------------------------------------- temporary
     flow = post(f"{api._base(project)}/agents/{agent}/flows",
                 {"displayName": "zz_tmp_gap_probe", "description": "temporal"})
     flow_name = flow.get("name", "")
     flow_id = flow_name.rsplit("/", 1)[-1]
     if not flow_id:
-        print("no se pudo crear el flow temporal:", flow)
+        print("the temporary flow could not be created:", flow)
         return 1
     atexit.register(lambda: borrar(f"{api._base(project)}/agents/{agent}/flows/{flow_id}"))
 
@@ -85,23 +85,23 @@ def main() -> int:
                 {"displayName": "Pagina probe",
                  "entryFulfillment": {"messages": [{"text": {"text": ["hola"]}}]}})
     page_name = page.get("name", "")
-    print("flow:", flow_id, "| pagina:", page_name.rsplit("/", 1)[-1])
+    print("flow:", flow_id, "| page:", page_name.rsplit("/", 1)[-1])
 
-    # un playbook real (para probar targetPlaybook)
+    # a real playbook (to test targetPlaybook)
     pbs = api.list_playbooks(agent, project)
     pb_ref = ""
     if pbs:
         pb_id = (pbs[0].get("name") or "").rsplit("/", 1)[-1]
         pb_ref = f"{base}/playbooks/{pb_id}"
 
-    # un entity type real (para el formulario)
+    # a real entity type (for the form)
     ets = api.list_entity_types(agent, project)
     et_ref = ""
     if ets:
         et_ref = (ets[0].get("name") or "").split("/entityTypes/")[-1]
         et_ref = f"{base}/entityTypes/{et_ref}"
 
-    print("\n== PAGINA ==")
+    print("\n== PAGE ==")
 
     def set_adv(d, v):
         d.setdefault("advancedSettings", {})["enabled"] = v
@@ -169,7 +169,7 @@ def main() -> int:
     probar("Flow.modelIdentifier", flow_name, set_modelid, "modelIdentifier",
            "modelIdentifier", {"modelId": "11111111-2222-3333-4444-555555555555"})
 
-    print("\n== TOOL (temporal) ==")
+    print("\n== TOOL (temporary) ==")
     tool = post(f"{api._base(project)}/agents/{agent}/tools",
                 {"displayName": "zz_tmp_tool_probe",
                  "description": "temporal",
@@ -187,9 +187,9 @@ def main() -> int:
                                   "inputParameters": [{"name": "q", "schema": "{\"type\":\"string\"}"}],
                                   "outputParameters": []}])
     else:
-        print("  no se pudo crear el tool temporal:", json.dumps(tool)[:200])
+        print("  the temporary tool could not be created:", json.dumps(tool)[:200])
 
-    print("\n== ENTITY TYPE (temporal) ==")
+    print("\n== ENTITY TYPE (temporary) ==")
     et = post(f"{api._base(project)}/agents/{agent}/entityTypes",
               {"displayName": "zz_tmp_et_probe",
                "entities": [{"value": "uno", "synonyms": ["uno"], "dtmfPattern": "1"}]})
@@ -204,9 +204,9 @@ def main() -> int:
         probar("EntityType.entities[0].dtmfPattern", et_name, set_dtmf, "entities",
                "entities.dtmfPattern", "9")
     else:
-        print("  no se pudo crear el entityType temporal:", json.dumps(et)[:200])
+        print("  the temporary entityType could not be created:", json.dumps(et)[:200])
 
-    print("\n== INTENT (temporal) ==")
+    print("\n== INTENT (temporary) ==")
     intent = post(f"{api._base(project)}/agents/{agent}/intents",
                   {"displayName": "zz_tmp_intent_probe",
                    "trainingPhrases": [{"parts": [{"text": "hola"}], "repeatCount": 1}]})
@@ -221,9 +221,9 @@ def main() -> int:
         probar("Intent.trainingPhrases[0].parts[0].auto", intent_name, set_auto,
                "trainingPhrases", "trainingPhrases.parts.auto", False)
     else:
-        print("  no se pudo crear el intent temporal:", json.dumps(intent)[:200])
+        print("  the temporary intent could not be created:", json.dumps(intent)[:200])
 
-    print("\n== AGENTE (se revierte en el acto) ==")
+    print("\n== AGENT (reverted on the spot) ==")
     agent_name = base
 
     def set_webclient(d, v):
@@ -238,7 +238,7 @@ def main() -> int:
     probar("Agent.advancedSettings.enabled", agent_name, set_agent_adv, "advancedSettings",
            "advancedSettings.enabled", True)
 
-    print("\n== RESUMEN ==")
+    print("\n== SUMMARY ==")
     for etiqueta, ok, det in RESULTADOS:
         print(f"  {'OK ' if ok else 'NO '} {etiqueta:<58} {det}")
     return 0

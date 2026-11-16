@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Captura el trafico REAL de la consola (incluido el iframe /cx/) via CDP:
-cabeceras completas y cuerpos de respuesta del backend interno.
+"""Captures the REAL traffic of the console (including the /cx/ iframe) via CDP:
+full headers and response bodies from the internal backend.
 
-Los eventos de red de Playwright no se disparan sobre contextos conectados por
-CDP, y la sesion CDP de la pagina principal no ve los iframes: hay que abrir
-una sesion CDP por frame.
+The Playwright network events do not fire on contexts connected via
+CDP, and the CDP session of the main page does not see the iframes: you have to open
+one CDP session per frame.
 
-Uso: .venv/bin/python capture_console_traffic.py --agent clon [--out /tmp/t.json]
+Usage: .venv/bin/python capture_console_traffic.py --agent clon [--out /tmp/t.json]
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 CONSOLE_URL = (
@@ -31,9 +31,9 @@ CONSOLE_URL = (
 
 
 def attach_frames(page):
-    """Abre una sesion CDP por cada frame de la pagina."""
+    """Opens one CDP session for each frame of the page."""
     sesses = []
-    for fr in page.frames:
+    for fr in page.frames:  # noqa: B007
         try:
             s = page.context.new_cdp_session(fr)
             s.send("Network.enable")
@@ -89,26 +89,26 @@ def main() -> int:
         sess.on("Network.requestWillBeSent", on_req)
         sess.on("Network.loadingFinished", on_fin)
 
-    # La pagina principal ya esta cargada; se navega y se enganchan las sesiones
-    # de todos los frames (el iframe /cx/ se crea durante la carga).
+    # The main page is already loaded; navigate and hook the sessions
+    # of all the frames (the /cx/ iframe is created during the load).
     page.goto("about:blank")
     time.sleep(1)
-    for fr in page.frames:
+    for fr in page.frames:  # noqa: B007
         pass
     page.goto(url, wait_until="domcontentloaded", timeout=90_000)
     time.sleep(3)
-    for fr, s in attach_frames(page):
+    for fr, s in attach_frames(page):  # noqa: B007
         make_handlers(s)
     time.sleep(args.wait / 1000)
 
-    print(f"== peticiones clients6: {len(requests)}", flush=True)
+    print(f"== clients6 requests: {len(requests)}", flush=True)
     flows = [r for r in requests if "/flows/" in r["url"]]
     for r in flows[:2]:
         print(f"\n=== {r['method']} {r['url'][:180]}", flush=True)
         for k, v in sorted(r["headers"].items()):
             print(f"    {k}: {v[:200]}", flush=True)
 
-    print(f"\n== cuerpos capturados: {len(bodies)}", flush=True)
+    print(f"\n== captured bodies: {len(bodies)}", flush=True)
     for u, body in bodies:
         if "transitionRoutes" not in body:
             continue
@@ -121,7 +121,7 @@ def main() -> int:
             tr = p.get("transitionRoutes") or []
             if not tr:
                 continue
-            print(f"  PAGINA {p.get('displayName')} ({len(tr)} rutas)", flush=True)
+            print(f"  PAGE {p.get('displayName')} ({len(tr)} routes)", flush=True)
             for r in tr:
                 print(f"    - {r.get('name','').split('/')[-1]} | {r.get('condition')}", flush=True)
                 print(f"        targetPlaybook: {r.get('targetPlaybook')}", flush=True)
@@ -130,7 +130,7 @@ def main() -> int:
         Path(args.out).write_text(json.dumps(
             {"requests": requests, "bodies": [{"url": u, "body": b} for u, b in bodies]},
             indent=1, ensure_ascii=False), encoding="utf-8")
-        print(f"== escrito {args.out}", flush=True)
+        print(f"== written {args.out}", flush=True)
     return 0
 
 

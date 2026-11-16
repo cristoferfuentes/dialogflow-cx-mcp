@@ -1,19 +1,18 @@
-"""Nucleo: poner un PLAYBOOK como destino de una TransitionRoute.
+"""Core: set a PLAYBOOK as the target of a TransitionRoute.
 
-Por que hace falta esto (medido, ver 02-LIMITES-DE-LA-API.md del workspace):
+Why this is needed (measured, see `cxp/limits.py`):
 
-* Proto PUBLICO (`global-dialogflow.googleapis.com`): `TransitionRoute.target` es
-  un `oneof` con SOLO `target_page` y `target_flow`. `targetPlaybook` no existe.
-  Un PATCH con `targetPlaybook` se **descarta en silencio**.
-* Proto INTERNO de la consola (`dialogflow.clients6.google.com`): el modelo de
-  la consola (`lG` en el bundle) tiene
+* Proto PUBLIC (`global-dialogflow.googleapis.com`): `TransitionRoute.target` is
+  a `oneof` with ONLY `target_page` and `target_flow`. `targetPlaybook` does not exist.
+  A PATCH with `targetPlaybook` is **silently dropped**.
+* Console proto INTERNAL (`dialogflow.clients6.google.com`): the console model
+  (`lG` in the bundle) has
   `["condition","enableNonConsecutiveTriggering","event","name","targetFlow","targetPage","targetPlaybook","triggerFulfillment"]`
-  -> si existe `targetPlaybook` y es parte del MISMO oneof `target`.
+  -> if `targetPlaybook` exists and is part of the SAME oneof `target`.
 
-Consecuencia practica: hay que quitar `targetPage`/`targetFlow` de la ruta antes
-de poner `targetPlaybook`, o el servidor responde
-`oneof field 'target' is already set`.
-"""
+Practical consequence: you must remove `targetPage`/`targetFlow` from the route before
+setting `targetPlaybook`, or the server responds
+`oneof field 'target' is already set`."""
 from __future__ import annotations
 
 import copy
@@ -29,7 +28,7 @@ def _playbook_resource(agent_id: str, playbook_id: str, project: str, location: 
 
 
 def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
-    """Ubica la ruta por `name` (uuid), por condicion exacta o por indice."""
+    """Locate the route by `name` (uuid), by exact condition, or by index."""
     if isinstance(ref, int):
         if not 0 <= ref < len(routes):
             raise LookupError(f"indice de ruta fuera de rango: {ref} (hay {len(routes)})")
@@ -40,7 +39,7 @@ def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
     for i, r in enumerate(routes):
         if r.get("condition") == ref:
             return i, r
-    # coincidencia parcial por condicion (util si el texto fue truncado)
+    # partial match by condition (useful if the text was truncated)
     hits = [i for i, r in enumerate(routes) if ref and ref in (r.get("condition") or "")]
     if len(hits) == 1:
         return hits[0], routes[hits[0]]
@@ -53,7 +52,7 @@ def build_routes_with_playbook(
     playbook_resource: str,
     clear_targets: bool = True,
 ) -> list[dict]:
-    """Devuelve la lista de rutas con el destino a playbook en `index`."""
+    """Return the list of routes with the playbook target in `index`."""
     out = copy.deepcopy(routes)
     route = out[index]
     if clear_targets:
@@ -64,11 +63,11 @@ def build_routes_with_playbook(
 
 
 def summarize(routes: list[dict]) -> list[dict]:
-    """Vista compacta de las rutas: condicion, destino y si tiene destino."""
+    """Compact view of the routes: condition, target, and whether it has a target."""
     rows = []
     for r in routes:
         target = None
-        kind = "SIN DESTINO"
+        kind = "NO TARGET"
         for key in TARGET_KEYS:
             if r.get(key):
                 target = str(r[key]).split("/")[-1]
@@ -96,7 +95,7 @@ def set_route_playbook(
     dry_run: bool = False,
     timeout: float | None = 300.0,
 ) -> dict:
-    """Pone un playbook como destino de una transition route. Devuelve el informe."""
+    """Set a playbook as the target of a transition route. Returns the report."""
     from .guard import assert_writable
 
     assert_writable(agent_id, api.cfg)
@@ -156,7 +155,7 @@ def set_route_playbook(
 
 
 def diff_routes(original: list[dict], clone: list[dict]) -> dict:
-    """Compara las rutas de dos agentes por `name` de ruta (estable entre copias)."""
+    """Compare the routes of two agents by route `name` (stable across copies)."""
     by_name_orig = {r.get("name"): r for r in original}
     by_name_clone = {r.get("name"): r for r in clone}
     rows = []
@@ -185,11 +184,10 @@ def diff_routes(original: list[dict], clone: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Receta DELETE + CREATE
-#
-# El PATCH de una pagina de un agente grande se come el deadline del servidor
-# (408 a los ~240 s, medido) porque la escritura dispara la revalidacion del
-# agente entero. CREATE valida menos, asi que se recrea la pagina.
+# Recipe DELETE + CREATE
+# The PATCH of a page of a large agent eats the server deadline
+# (408 at ~240 s, measured) because the write triggers revalidation of the
+# entire agent. CREATE validates less, so the page is recreated.
 # ---------------------------------------------------------------------------
 PAGE_CONTENT_FIELDS = (
     "entryFulfillment",
@@ -203,7 +201,7 @@ PAGE_CONTENT_FIELDS = (
 
 
 def page_content(page: dict) -> dict:
-    """El contenido de una pagina que hay que arrastrar al recrearla."""
+    """The content of a page that must be dragged when recreating it."""
     body: dict = {"displayName": page.get("displayName")}
     for field in PAGE_CONTENT_FIELDS:
         if page.get(field):
@@ -223,12 +221,11 @@ def recreate_page_with_playbook(
     rename: bool = True,
     repoint: bool = True,
 ) -> dict:
-    """Recrea la pagina con el destino a playbook (CREATE en vez de PATCH).
+    """Recreate the page with the target as playbook (CREATE instead of PATCH).
 
-    Pasos: CREATE con nombre temporal -> DELETE de la vieja -> renombrar ->
-    re-apuntar las referencias entrantes (por id, solo las que apuntan a la
-    pagina vieja).
-    """
+    Steps: CREATE with a temporary name -> DELETE of the old one -> rename ->
+    re-apuntar the incoming references (by id, only those pointing to the
+    old page)."""
     from .guard import assert_writable
 
     assert_writable(agent_id, api.cfg)

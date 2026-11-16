@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Sonda 2: escritura de campos fuera de esquema en TOOL / ENTITYTYPE / INTENT / AGENTE.
+"""Probe 2: writing out of schema fields on TOOL / ENTITYTYPE / INTENT / AGENT.
 
-Copia recursos existentes del clon (o crea temporales) y los borra al final.
+It copies existing resources from the clone (or creates temporary ones) and deletes
+them at the end.
 """
 from __future__ import annotations
 
@@ -61,7 +62,7 @@ def main() -> int:
             RESULTADOS.append((etiqueta, ok, json.dumps(leido, ensure_ascii=False)[:120]))
             print(f"  [{'OK ' if ok else 'NO '}] {etiqueta} -> {json.dumps(leido, ensure_ascii=False)[:110]}")
             if not ok:
-                print("        respuesta:", json.dumps(respuesta, ensure_ascii=False)[:260])
+                print("        response:", json.dumps(respuesta, ensure_ascii=False)[:260])
             if revertir:
                 patch(nombre, before, mascara)
         except Exception as exc:
@@ -80,7 +81,7 @@ def main() -> int:
         try:
             nuevo = post(f"{api_base}/agents/{agent}/tools", cuerpo)
             tool_name = nuevo.get("name", "")
-            print("  tool temporal:", tool_name.rsplit("/", 1)[-1])
+            print("  temporary tool:", tool_name.rsplit("/", 1)[-1])
             if tool_name:
                 atexit.register(lambda: borrar(
                     f"{api_base}/agents/{agent}/tools/" + tool_name.rsplit("/", 1)[-1]))
@@ -95,7 +96,7 @@ def main() -> int:
                 probar("Tool.actionSchemas", tool_name, set_actionschemas, "actionSchemas",
                        "actionSchemas", esquemas)
         except Exception as exc:
-            print("  [ERR] no se pudo crear el tool temporal:", str(exc)[:300])
+            print("  [ERR] the temporary tool could not be created:", str(exc)[:300])
 
     # ------------------------------------------------------------ ENTITY TYPE
     print("\n== ENTITY TYPE ==")
@@ -104,7 +105,7 @@ def main() -> int:
                   {"displayName": "zz_tmp_et_probe",
                    "entities": [{"value": "uno", "synonyms": ["uno"], "dtmfPattern": "1"}]})
         et_name = et.get("name", "")
-        print("  entityType temporal:", et_name.rsplit("/", 1)[-1])
+        print("  temporary entityType:", et_name.rsplit("/", 1)[-1])
 
         def set_dtmf(d, v):
             d["entities"][0]["dtmfPattern"] = v
@@ -124,7 +125,7 @@ def main() -> int:
                       {"displayName": "zz_tmp_intent_probe",
                        "trainingPhrases": [{"parts": [{"text": "hola"}], "repeatCount": 1}]})
         intent_name = intent.get("name", "")
-        print("  intent temporal:", intent_name.rsplit("/", 1)[-1])
+        print("  temporary intent:", intent_name.rsplit("/", 1)[-1])
 
         def set_auto(d, v):
             d["trainingPhrases"][0]["parts"][0]["auto"] = v
@@ -137,8 +138,8 @@ def main() -> int:
     except Exception as exc:
         print("  [ERR] intent:", str(exc)[:300])
 
-    # ---------------------------------------------------------------- AGENTE
-    print("\n== AGENTE (se revierte en el acto) ==")
+    # ---------------------------------------------------------------- AGENT
+    print("\n== AGENT (reverted on the spot) ==")
 
     def set_webclient(d, v):
         d["webClientSettings"] = v
@@ -160,7 +161,7 @@ def main() -> int:
            set_smartendpoint, "advancedSettings",
            "advancedSettings.speechSettings.enableSmartEndpointing", False)
 
-    print("\n== RESUMEN ==")
+    print("\n== SUMMARY ==")
     for etiqueta, ok, det in RESULTADOS:
         print(f"  {'OK ' if ok else 'NO '} {etiqueta:<58} {det}")
     return 0

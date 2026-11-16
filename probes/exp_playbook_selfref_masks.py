@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""EXPERIMENTO: donde puede vivir la macro AUTORREFERENTE `${PLAYBOOK:si_mismo}`.
+"""EXPERIMENT: where can the SELF-REFERENCING macro `${PLAYBOOK:itself}` live.
 
-Medido hasta ahora (probe anterior):
-  * POST con la macro en `steps`      -> 400 (el playbook aun no existe / bucle)
-  * POST con la macro en `guidelines` -> 201 (CREADO, texto conservado)
-  * PATCH con la macro en `steps`     -> 400 'caused loop in playbook routes'
+Measured so far (previous probe):
+  * POST with the macro in `steps`      -> 400 (the playbook does not exist yet / loop)
+  * POST with the macro in `guidelines` -> 201 (CREATED, text preserved)
+  * PATCH with the macro in `steps`     -> 400 'caused loop in playbook routes'
 
-Lo que falta por medir (y decide el diseno del escape hatch):
-  * POST limpio + PATCH `updateMask=instruction.steps`      -> ? (mascara de
-    campo HOJA: segun AGENTS.md 2026-11-04g NO revalida las refs)
-  * POST limpio + PATCH `updateMask=instruction.guidelines`  -> ?
-  * POST limpio + PATCH `updateMask=instruction`             -> 400 (ya medido)
+What is still to be measured (and it decides the escape hatch design):
+  * clean POST + PATCH `updateMask=instruction.steps`      -> ? (LEAF field
+    mask: according to AGENTS.md 2026-11-04g it does NOT revalidate the refs)
+  * clean POST + PATCH `updateMask=instruction.guidelines`  -> ?
+  * clean POST + PATCH `updateMask=instruction`             -> 400 (already measured)
 
-Si la macro puede acabar en `steps` (su posicion FUNCIONAL: el runtime la
-expande), el escape hatch es mejor que esconderla en `guidelines` (que el
-runtime podria no expandir).
+If the macro can end up in `steps` (its FUNCTIONAL place: the runtime expands
+it), the escape hatch is better than hiding it in `guidelines` (which the
+runtime might not expand).
 
-Solo trabaja sobre NUESTRA COPIA (agente con permiso de escritura). Crea
-playbooks TEMPORALES (`zz_tmp_`) y los borra SIEMPRE (finally).
+It only works on OUR COPY (the agent with write permission). It creates
+TEMPORARY playbooks (`zz_tmp_`) and ALWAYS deletes them (finally).
 
     .venv/bin/python probes/exp_playbook_selfref_masks.py
 """
@@ -36,7 +36,7 @@ from cxp.httpclient import HttpStatusError
 
 
 def _estado(api: ConsoleApi, base: str, pid: str) -> dict:
-    """GET del playbook: texto + referencias registradas."""
+    """GET of the playbook: text + registered references."""
     pb = api.request("GET", api._url(f"{base}/playbooks/{pid}"))
     instr = pb.get("instruction") or {}
     return {
@@ -59,7 +59,7 @@ def main() -> int:
     resultados: dict[str, str] = {}
     try:
         # ------------------------------------------------------------------
-        # V1: POST limpio (sin macros) -> base para los PATCH
+        # V1: clean POST (no macros) -> base for the PATCHes
         # ------------------------------------------------------------------
         name = "zz_tmp_selfref_mask"
         body = {
@@ -70,72 +70,72 @@ def main() -> int:
                 "steps": [{"text": "Paso limpio sin macros."}],
             },
         }
-        print("=== V1: POST limpio (sin macros) ===")
+        print("=== V1: clean POST (no macros) ===")
         pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                          body=body, timeout=120.0)
         pid = pb["name"].split("/")[-1]
         creados.append(pid)
-        print(f"   CREADO: {pid}  ({pb.get('displayName')})")
+        print(f"   CREATED: {pid}  ({pb.get('displayName')})")
         print(f"   referencedPlaybooks: {pb.get('referencedPlaybooks')}")
 
         # ------------------------------------------------------------------
-        # V2: PATCH updateMask=instruction.steps  (mascara de CAMPO HOJA)
-        #     -> mete la macro autorreferente en steps
+        # V2: PATCH updateMask=instruction.steps  (LEAF FIELD mask)
+        #     -> puts the self-referencing macro in steps
         # ------------------------------------------------------------------
-        print("\n=== V2: PATCH updateMask=instruction.steps (hoja) con macro autorref ===")
+        print("\n=== V2: PATCH updateMask=instruction.steps (leaf) with self-ref macro ===")
         steps = [{"text": f"Delega en ${{PLAYBOOK:{name}}}"}]
         try:
             api.request("PATCH", api._url(f"{base}/playbooks/{pid}", alt="json"),
                         body={"instruction": {"steps": steps}},
                         query={"updateMask": "instruction.steps"}, timeout=120.0)
             est = _estado(api, base, pid)
-            print("   PATCH ACEPTADO")
+            print("   PATCH ACCEPTED")
             print(f"   steps:          {est['steps'][:160]}")
             print(f"   guidelines:     {est['guidelines']!r}")
             print(f"   refPlaybooks:   {est['referencedPlaybooks']}")
-            resultados["instruction.steps"] = "ACEPTADO (macro en steps, sin arista)"
+            resultados["instruction.steps"] = "ACCEPTED (macro in steps, no edge)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
             resultados["instruction.steps"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
-        # V3: PATCH updateMask=instruction.guidelines -> macro en guidelines
+        # V3: PATCH updateMask=instruction.guidelines -> macro in guidelines
         # ------------------------------------------------------------------
-        print("\n=== V3: PATCH updateMask=instruction.guidelines con macro autorref ===")
+        print("\n=== V3: PATCH updateMask=instruction.guidelines with self-ref macro ===")
         try:
             api.request("PATCH", api._url(f"{base}/playbooks/{pid}", alt="json"),
                         body={"instruction": {"guidelines": f"Delega en ${{PLAYBOOK:{name}}}"}},
                         query={"updateMask": "instruction.guidelines"}, timeout=120.0)
             est = _estado(api, base, pid)
-            print("   PATCH ACEPTADO")
+            print("   PATCH ACCEPTED")
             print(f"   guidelines:     {est['guidelines']!r}")
             print(f"   steps:          {est['steps'][:120]}")
             print(f"   refPlaybooks:   {est['referencedPlaybooks']}")
-            resultados["instruction.guidelines"] = "ACEPTADO"
+            resultados["instruction.guidelines"] = "ACCEPTED"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
             resultados["instruction.guidelines"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
-        # V4: PATCH updateMask=instruction (campo de NIVEL SUPERIOR)
-        #     -> deberia fallar con 'caused loop in playbook routes'
+        # V4: PATCH updateMask=instruction (TOP-LEVEL field)
+        #     -> should fail with 'caused loop in playbook routes'
         # ------------------------------------------------------------------
-        print("\n=== V4: PATCH updateMask=instruction (nivel superior) con macro autorref ===")
+        print("\n=== V4: PATCH updateMask=instruction (top level) with self-ref macro ===")
         try:
             api.request("PATCH", api._url(f"{base}/playbooks/{pid}", alt="json"),
                         body={"instruction": {"guidelines": "",
                                               "steps": [{"text": f"Delega en ${{PLAYBOOK:{name}}}"}]}},
                         query={"updateMask": "instruction"}, timeout=120.0)
-            print("   PATCH ACEPTADO (inesperado)")
-            resultados["instruction"] = "ACEPTADO (inesperado)"
+            print("   PATCH ACCEPTED (unexpected)")
+            resultados["instruction"] = "ACCEPTED (unexpected)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
             resultados["instruction"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
-        # V5: POST con la macro en `goal` (el goal TAMBIEN se escanea)
+        # V5: POST with the macro in `goal` (the goal is ALSO scanned)
         # ------------------------------------------------------------------
-        print("\n=== V5: POST con la macro autorreferente en `goal` ===")
+        print("\n=== V5: POST with the self-referencing macro in `goal` ===")
         name5 = "zz_tmp_selfref_goal"
         body5 = {
             "displayName": name5,
@@ -147,17 +147,17 @@ def main() -> int:
                               body=body5, timeout=120.0)
             pid5 = pb5["name"].split("/")[-1]
             creados.append(pid5)
-            print(f"   CREADO (inesperado): {pid5}")
-            resultados["goal"] = "ACEPTADO (inesperado)"
+            print(f"   CREATED (unexpected): {pid5}")
+            resultados["goal"] = "ACCEPTED (unexpected)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
             resultados["goal"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
-        # V6: POST con la macro en `guidelines` (el escape hatch conocido)
-        #     y con un `goal` NORMAL: comprueba que guidelines no se escanea
+        # V6: POST with the macro in `guidelines` (the known escape hatch)
+        #     and with a NORMAL `goal`: checks that guidelines is not scanned
         # ------------------------------------------------------------------
-        print("\n=== V6: POST con la macro autorreferente en `guidelines` ===")
+        print("\n=== V6: POST with the self-referencing macro in `guidelines` ===")
         name6 = "zz_tmp_selfref_guide"
         body6 = {
             "displayName": name6,
@@ -173,30 +173,30 @@ def main() -> int:
             pid6 = pb6["name"].split("/")[-1]
             creados.append(pid6)
             est = _estado(api, base, pid6)
-            print(f"   CREADO: {pid6}")
+            print(f"   CREATED: {pid6}")
             print(f"   guidelines:   {est['guidelines']!r}")
-            print(f"   refPlaybooks: {est['referencedPlaybooks']}  <-- arista registrada?")
-            resultados["POST guidelines"] = "ACEPTADO (sin arista)"
+            print(f"   refPlaybooks: {est['referencedPlaybooks']}  <-- edge registered?")
+            resultados["POST guidelines"] = "ACCEPTED (no edge)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
             resultados["POST guidelines"] = f"HTTP {e.status}"
 
-        print("\n=== RESUMEN ===")
+        print("\n=== SUMMARY ===")
         for k, v in resultados.items():
             print(f"   {k:28s} -> {v}")
 
     finally:
-        print("\n=== limpieza ===")
+        print("\n=== cleanup ===")
         for pid in creados:
             try:
                 api.request("DELETE", api._url(f"{base}/playbooks/{pid}", alt="json",
                                               force="true"))
-                print(f"   playbook {pid} borrado")
+                print(f"   playbook {pid} deleted")
             except HttpStatusError as e:
-                print(f"   !! no se pudo borrar {pid}: HTTP {e.status} {e.body[:160]}")
+                print(f"   !! could not delete {pid}: HTTP {e.status} {e.body[:160]}")
         vivos = [p for p in api.list_playbooks(agent)
                  if (p.get("displayName") or "").startswith("zz_tmp_")]
-        print("   playbooks zz_tmp_ restantes:", len(vivos))
+        print("   zz_tmp_ playbooks left:", len(vivos))
     return 0
 
 

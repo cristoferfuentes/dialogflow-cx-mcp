@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Saca la huella del navegador (cabeceras de cable + cookies) y la deja lista
-para curl / httpx. Tambien prueba las variantes de transporte.
+"""Extracts the browser fingerprint (wire headers + cookies) and leaves it ready
+for curl / httpx. It also tries the transport variants.
 
-Uso: .venv/bin/python dump_wire_headers.py [--agent clon]
+Usage: .venv/bin/python dump_wire_headers.py [--agent clon]
 """
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -15,9 +16,9 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agentes_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
 AGENTS = agentes_de_sonda()
@@ -39,7 +40,7 @@ BROWSER_HEADERS = {
     "x-goog-authuser": "0",
     "x-goog-encode-response-if-executable": "base64",
     "x-javascript-user-agent": "google-api-javascript-client/1.1.0",
-    "x-origin": None,     # se rellena
+    "x-origin": None,     # filled in
     "x-referer": None,
     "x-requested-with": "XMLHttpRequest",
 }
@@ -85,7 +86,7 @@ def main() -> int:
     with open(args.out, "w", encoding="utf-8") as fh:
         for k, v in headers.items():
             fh.write(f"{k}: {v}\n")
-    print(f"== cabeceras en {args.out}")
+    print(f"== headers in {args.out}")
 
     a, f, pg = AGENTS[args.agent]
     url = (f"https://{CONSOLE_HOST}/v3alpha1/projects/{cfg.project}/locations/global/agents/{a}"

@@ -1,153 +1,303 @@
-# MCP `cx-playbook` — espejo de la API **v3beta1** de Dialogflow CX **+ los huecos que la API pública no puede expresar**
+# dialogflow-cx-mcp
 
-Un servidor [MCP](https://modelcontextprotocol.io) para operar Dialogflow CX.
+[![CI](https://github.com/cristoferfuentes/dialogflow-cx-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/cristoferfuentes/dialogflow-cx-mcp/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-server-purple.svg)](https://modelcontextprotocol.io)
 
-Hace **dos cosas**:
+An [MCP](https://modelcontextprotocol.io) server for **Dialogflow CX** that mirrors the
+public `v3beta1` API **and reaches the fields the public API cannot express**.
 
-1. **Espejo de la API pública v3beta1** (los 162 métodos / 32 recursos del
-   *discovery doc* oficial), con herramientas tipadas para el uso diario y un
-   passthrough genérico 1:1.
-2. **Tapa los agujeros de la API pública**: hay cosas que la consola de
-   Dialogflow CX puede hacer y la API pública **no puede ni leer ni escribir**
-   (por ejemplo, poner un *playbook* como destino de una transición). Este MCP
-   las hace, y además **te dice cuáles son** (`cx_gaps`).
+It does two things:
 
-**No tiene proyecto ni agente cableados**: todo se configura en un `.env`.
-**No necesita navegador**: la única credencial es una cabecera `Cookie`.
+1. **Mirrors the public v3beta1 API** — all 162 methods / 32 resources of the official
+   *discovery doc* — with typed tools for everyday use plus a generic 1:1 passthrough.
+2. **Fills the holes in the public API** — there are things the Dialogflow CX console can
+   do that the public API can *neither read nor write* (for example, pointing a transition
+   route at a playbook). This MCP does them, and it also **tells you which ones they
+   are** (`cx_gaps`).
 
-> ⚠️ **No es un producto de Google.** Habla con el backend interno de la
-> consola (`dialogflow.clients6.google.com`) usando la autenticación de
-> primera parte de tu propia cuenta. Revisa el [estado legal](#aviso-legal).
+**No project and no agent are hardcoded**: everything is configured through a `.env`.
+**No browser required**: the only credential is a `Cookie` header.
 
----
-
-## Índice
-
-- [Por qué el backend interno](#por-qué-el-backend-interno)
-- [Los huecos de la API pública](#los-huecos-de-la-api-pública)
-- [Instalación](#instalación)
-- [Cómo obtener las credenciales](#cómo-obtener-las-credenciales)
-- [Referencia del `.env`](#referencia-del-env)
-- [Registro en un cliente MCP](#registro-en-un-cliente-mcp)
-- [Herramientas](#herramientas)
-- [Instrucciones para el agente que usa este MCP](#instrucciones-para-el-agente-que-usa-este-mcp)
-- [Límites medidos de la API](#límites-medidos-de-la-api)
-- [Detalles técnicos (medidos)](#detalles-técnicos-medidos)
-- [Desarrollo](#desarrollo)
-- [Aviso legal](#aviso-legal)
+> ⚠️ **This is not a Google product.** It talks to the console's internal backend
+> (`dialogflow.clients6.google.com`) using your own account's first-party authentication.
+> Please read the [legal notice](#legal-notice) before using it.
 
 ---
 
-## Por qué el backend interno
+## Table of contents
 
-La API pública de Dialogflow CX (`dialogflow.googleapis.com/v3beta1`) y el
-backend interno que usa la consola (`dialogflow.clients6.google.com/v3beta1`)
-sirven **el mismo *discovery doc***, pero **no el mismo proto**:
+- [Why the internal backend](#why-the-internal-backend)
+- [The gaps in the public API](#the-gaps-in-the-public-api)
+  - [What can be WRITTEN](#what-can-be-written)
+  - [What can only be READ](#what-can-only-be-read)
+  - [The systematic list: the console's internal proto](#the-systematic-list-the-consoles-internal-proto)
+  - [The big one: `targetPlaybook`](#the-big-one-targetplaybook)
+  - [Method gaps: endpoints in no descriptor](#method-gaps-endpoints-in-no-descriptor)
+- [Install](#install)
+- [Get the credentials](#get-the-credentials)
+- [Environment variables](#environment-variables)
+- [Register it in an MCP client](#register-it-in-an-mcp-client)
+- [Tools](#tools)
+- [Instructions for the agent using this MCP](#instructions-for-the-agent-using-this-mcp)
+- [Measured API limits](#measured-api-limits)
+- [Technical details (measured)](#technical-details-measured)
+- [Conversation history (via the API)](#conversation-history-via-the-api)
+- [Development](#development)
+- [Security](#security)
+- [Legal notice](#legal-notice)
+- [License](#license)
 
-* El **proto público** de `TransitionRoute` es un `oneof` con `target_page` y
-  `target_flow`. **`target_playbook` no existe.** Un `PATCH` que lo envíe se
-  **descarta en silencio**: la ruta queda sin destino y el agente cae en
+---
+
+## Why the internal backend
+
+The public Dialogflow CX API (`dialogflow.googleapis.com/v3beta1`) and the console's
+internal backend (`dialogflow.clients6.google.com/v3beta1`) serve the **same discovery
+doc** — but **not the same proto**:
+
+* The **public proto** of `TransitionRoute` is a `oneof` with `target_page` and
+  `target_flow`. **`target_playbook` does not exist.** A `PATCH` that sends it is
+  **silently dropped**: the route is left without a target and the agent falls into
   `NO_MATCH`.
-* El **proto del backend de la consola** es más rico: conoce campos que la API
-  pública **ni siquiera declara** en el descriptor.
+* The **console's internal proto** is richer: it knows fields the public API does not
+  even declare in its descriptor.
 
-Por eso comparar los dos descriptores no encuentra nada (son idénticos): lo que
-difiere es **qué campos acepta cada proto**. Y por eso este MCP:
+That is why comparing the two descriptors finds nothing (they are identical): what
+differs is **which fields each proto accepts**. And that is why this MCP:
 
-* habla con el backend de la consola (autenticación de primera parte: tus
-  cookies de Google + firma `SAPISIDHASH`), y
-* trae una capa que **compara el JSON real con el esquema público** para
-  detectar los campos que la API pública no puede expresar.
+* talks to the console's backend (first-party authentication: your Google cookies plus
+  a `SAPISIDHASH` signature), and
+* carries a layer that **compares the real JSON against the public schema** to detect the
+  fields the public API cannot express.
 
-Detalle fino: **usa `v3beta1`, nunca `v3`**. En `v3` no existen campos como
-`llmModelSettings.parameters` y se descartan en silencio.
+Fine print: **use `v3beta1`, never `v3`**. In `v3`, fields such as
+`llmModelSettings.parameters` do not exist and are silently dropped.
 
 ---
 
-## Los huecos de la API pública
+## The gaps in the public API
 
-Un **hueco** es un campo que el backend de la consola expone y que la API
-pública **no declara**: por la API pública no se puede ni leer ni escribir.
+A **gap** is a field that the console's backend exposes and that the public API does
+**not declare**: through the public API it can be neither read nor written.
 
-El MCP los detecta **en vivo** (`cx_gaps`), comparando cada recurso del agente
-con el esquema público del *discovery doc* oficial. No es una lista escrita a
-mano: si Google añade un campo nuevo a la consola, el MCP lo ve sin tocar el
-código.
+The MCP detects them **live** (`cx_gaps`), comparing each resource of the agent against
+the public schema of the official *discovery doc*. It is not a hand-written list: if
+Google adds a new field to the console, the MCP sees it without touching the code.
 
-### Lo que se puede ESCRIBIR (medido: escrito y releído)
+### What can be WRITTEN
 
-| Recurso | Campo | Herramienta |
+Measured: written and read back.
+
+| Resource | Field | Tool |
 |---|---|---|
 | `Page`, `Flow`, `TransitionRouteGroup` | `transitionRoutes[].targetPlaybook` | `cx_set_route_playbook`, `cx_set_flow_route_playbook`, `cx_set_group_route_playbook` |
 | `Page` | `form.parameters[].description` | `cx_set_console_field` |
+| `Page` | `form.parameters[].convertPhoneticAlphabets` | `cx_set_console_field` |
+| `Intent` | `parameters[].description` | `cx_set_console_field` |
 | `EntityType` | `entities[].dtmfPattern` | `cx_set_console_field` |
-| `Agent` | `webClientSettings` (p. ej. `boxBorderRadius`) | `cx_set_console_field` |
+| `Agent` | `webClientSettings` (e.g. `boxBorderRadius`) | `cx_set_console_field` |
 
-### Lo que solo se puede LEER (el servidor lo deriva)
+### What can only be READ (the server derives it)
 
-| Recurso | Campo | Por qué |
+| Resource | Field | Why |
 |---|---|---|
-| `Tool` | `actionSchemas`, `sharedSchemas` | el servidor los deriva del `openApiSpec`/`dataStoreSpec`; escribirlos no cambia nada |
-| `Agent`/`Page`/`Flow` | `advancedSettings.enabled`, `.playbackInterruptionSettings`, `.speechAdaptationSettings` | al escribir el mensaje, el servidor vacía los subcampos desconocidos |
-| `Agent` | `speakerIdSettings` | el servidor lo devuelve como `{}` y descarta lo que se le escriba |
-| `Flow` | `modelIdentifier`, `nluSettingsList`, `nluSettings.customConfigKey` | los regenera el servidor |
-| `Intent` | `trainingPhrases[].parts[].auto` | marca de frase autogenerada |
-| `Tool` | `dataStoreSpec.models`, `.groundingSettings` | modelo de resumido y *grounding* del tool de data store |
-| `Agent` | `projectNumber` | el número de proyecto que ve la consola |
-| `Playbook` | `speechAdaptationSettings` | ajustes de adaptación de voz |
+| `Tool` | `actionSchemas`, `sharedSchemas` | the server derives them from `openApiSpec`/`dataStoreSpec`; writing them changes nothing |
+| `Agent`/`Page`/`Flow` | `advancedSettings.enabled`, `.playbackInterruptionSettings`, `.speechAdaptationSettings` | when the message is written, the server empties the unknown subfields |
+| `Agent`/`Page`/`Flow` | `advancedSettings.loggingSettings.disableLogging` | on `PATCH` of `advancedSettings`, the server empties the submessage (`loggingSettings` stays `{}`) |
+| `Agent` | `speakerIdSettings` | the server returns it as `{}` and drops whatever is written to it |
+| `Flow` | `modelIdentifier`, `nluSettingsList`, `nluSettings.customConfigKey` | the server regenerates them |
+| `Intent` | `trainingPhrases[].parts[].auto` | marker for an auto-generated phrase |
+| `Page` | `entryFulfillment.messages[].text.ssml` | the internal proto has it, but the server drops it when written there |
+| `Tool` | `dataStoreSpec.models`, `.groundingSettings` | summary model and grounding of the data store tool |
+| `Agent` | `projectNumber` | the project number the console sees |
+| `Playbook` | `speechAdaptationSettings` | speech adaptation settings |
+| `Environment` | `etag` | the server computes it |
 
-### El caso grande: `targetPlaybook`
+### The systematic list: the console's internal proto
 
-La API pública v3beta1 tiene **tres** vías para llegar a un playbook, y
-ninguna es equivalente a "una transición → un playbook":
+`cx_gaps` sees the gaps **live**, on the agent's real data: if the agent has no
+`Environment`, it does not see its gaps. For that there is `cx_proto_interno`: the
+console's **internal** proto (the one it really uses) carries **more fields** than the
+public descriptor, and it is recovered from the **console bundle** (its client-side code
+ships the proto minified: the class names are minified, but the **field names are not**).
 
-| vía pública | ¿existe? | ¿equivale a "ruta → playbook"? |
+Method: 1536 classes from the bundle × 709 schemas from the discovery doc, paired by
+"the class contains all the public fields of the schema **and** contributes extra
+fields" (a tie is discarded as ambiguous).
+
+| Schema | Internal fields the public API does not declare | Measured state |
 |---|---|---|
-| `EventHandler.targetPlaybook` | ✅ | ❌ el `EventHandler` **no tiene `condition`**: dispara por evento, no por parámetros de sesión |
-| `Agent.startPlaybook` | ✅ | ❌ es un punto de entrada del **agente**, no de un flow ni de una ruta |
-| `Playbook.referencedPlaybooks` / `inlineActions` | ✅ pero `readOnly: true` | ❌ no se pueden escribir |
+| `FormParameter` | `convertPhoneticAlphabets`, `description` | writable |
+| `QueryInput` | `alternativeLanguageCodes`, `multiPartyTranscripts`, `partialTranscript`, `speechTranscripts`, `tokenizedAudio` | 2 input-only, 1 not accepted, 2 ignored |
+| `TransitionRoute` | `targetPlaybook` | writable |
+| `Webhook` | `cloudFunction`, `etag`, `webhookFakeConfig` | 1 writable, 1 not accepted, 1 ignored |
+| `EventHandler` | `condition`, `enableNonConsecutiveTriggering` | 1 writable, 1 ignored |
+| `AdvancedSettingsDtmfSettings` | `customRule`, `disableSpeechDetection`, `entityType`, `useSystemEntityRule` | all 4 ignored |
+| `AdvancedSettingsSpeechSettings` | 13 fields (LLM endpointing, Gemini ASR, fallback models…) | 11 writable, 2 ignored |
+| `ConversationTurnUserInput` | `parameterScope` | writable |
+| `IntentParameter` | `description` | writable |
+| `AdvancedSettingsLoggingSettings` | `disableLogging` | dropped |
+| `IntentTrainingPhrasePart` | `auto`, `multiIntentIndicator` | 1 derived, 1 ignored |
+| `ConversationTurn` | `expectations` | ignored |
+| `DtmfInput` | `transformed` | writable |
+| `ResponseMessageText` | `ssml` | dropped |
 
-Y lo que **no existe**: `TransitionRoute.targetPlaybook`. Como la
-`TransitionRoute` es **el mismo mensaje** en los tres sitios donde vive (la
-página, el router del flow y el grupo de rutas), el hueco se repite en los
-tres, y el MCP lo cubre en los tres:
+**All 38 fields are measured** (none is left untested), by writing and reading back in a
+temporary lab agent (`probes/exp_verifica_campos_internos.py`).
 
-| nivel | cubre | qué habilita |
+| State | What it means |
+|---|---|
+| `escribible` | the backend **keeps it**: it is written and read back |
+| `ignorado` | the backend **does not know it**: it is silently ignored, like an invented name |
+| `descartado` | it knows it, but **empties** it when written |
+| `derivado` | the server **computes** it (readable, not writable) |
+| `solo_entrada` | it exists and is accepted in the request, but **cannot be read** |
+| `no_aceptado` | it knows it, but **rejects** the value |
+
+#### How it is measured (the type-error trick)
+
+The backend *knowing* a field does not mean it *accepts* it. To find out you do not need
+to capture the console writing: the backend **fails with the type** when the field
+exists and the value does not fit, and **silently ignores** names it does not know:
+
+```
+Invalid value at 'agent.advanced_settings.speech_settings.fix_transcripts' (TYPE_BOOL), "x"
+Invalid value at 'query_input.speech_transcripts' (type.googleapis.com/…TranscriptInput), "x"
+Invalid JSON payload received. Unknown name "uri" at 'webhook.cloud_function': Proto field is not repeating, cannot start list.
+```
+
+=> the error reveals the **name and the type** of the field. An invented name produces no
+error (a positive control is mandatory in every probe: without it, "ignored" could be a
+false negative). **Seven values** are sent (object, string, integer, boolean and three
+lists) and the type is deduced from the error path; the `[0]` index betrays a *repeated*
+field.
+
+Step 2 is to write a **valid** value of the measured type and read the resource back: if
+the value is not there, the backend dropped it.
+
+Traps on this path (all measured):
+
+* `detectIntent` requires an input type: without text it answers *"Unknown type for
+  QueryInput."* and that error **masks** the field's error. And the voice fields live in
+  the `input` `oneof` **next to the text**: sending them with text gives *"oneof field
+  'input' is already set"*.
+* The `PATCH` of `eventHandlers` **replaces** the array: the default handlers must be
+  sent back or the server answers *"You cannot delete event handler for
+  'sys.no-input-default' in the flow"*.
+* A training phrase requires `repeatCount >= 1`.
+* `cloudFunction` is in the `webhook` `oneof` and the backend's validator **always**
+  requires a `genericWebService.uri` => it is impossible to set.
+* `serviceDirectory` (public) only works on **regional agents** (*"Service Directory
+  webhook is only supported for regional agents"*).
+
+#### The result: 12 fields the backend does not know
+
+`fallbackModels`, `overrideRequestSpeechModel`, `customRule`,
+`disableSpeechDetection`, `entityType`, `useSystemEntityRule`,
+`multiPartyTranscripts`, `tokenizedAudio`, `etag`,
+`enableNonConsecutiveTriggering`, `expectations`, `multiIntentIndicator`.
+
+This is not a failure of the public API: **the console's model runs ahead of the
+backend's**. Those fields exist in the proto the console ships, but the backend does not
+have them in its descriptor and silently ignores them (measured in the agent's, the
+flow's and the page's `advancedSettings.dtmfSettings`, and with the name in both
+camelCase and snake_case).
+
+The **11 `AdvancedSettingsSpeechSettings` fields that do get written** are the useful part
+of this work: without them the public API cannot enable LLM endpointing
+(`enableLlmEndpointing`, `enableAggressiveEndpointing`,
+`disableTimeoutBasedEndpointing`), Gemini ASR (`useGeminiAsr`, `geminiAsrConfig`),
+transcript correction (`fixTranscripts`) or `utteranceWaitTimeout`. They are written with
+`cx_set_console_field` (which verifies by reading back):
+
+```jsonc
+// cx_set_console_field(resource="agent",
+//                      field="advancedSettings.speechSettings.enableLlmEndpointing",
+//                      value=true, dry_run=false)
+// -> {"mode": "written", "saved": true, ...}
+```
+
+### The big one: `targetPlaybook`
+
+The public v3beta1 API has **three** ways of reaching a playbook, and none of them is
+equivalent to "one transition -> one playbook":
+
+| public route | exists? | equivalent to "route -> playbook"? |
 |---|---|---|
-| **página** | `cx_set_route_playbook` | "dada una condición en ESTA página → playbook X" |
-| **flow** | `cx_set_flow_route_playbook` | "**al entrar** a este flow → playbook X" (imposible por API pública: a un flow solo se entra con `targetFlow` o `Agent.startFlow`) |
-| **grupo de rutas** | `cx_set_group_route_playbook` | una ruta compartida por varias páginas → playbook X |
+| `EventHandler.targetPlaybook` | ✅ | ❌ the `EventHandler` has **no `condition`**: it fires on an event, not on session parameters |
+| `Agent.startPlaybook` | ✅ | ❌ it is an entry point of the **agent**, not of a flow or a route |
+| `Playbook.referencedPlaybooks` / `inlineActions` | ✅ but `readOnly: true` | ❌ they cannot be written |
 
-Diferencias de comportamiento (medidas):
+And what **does not exist**: `TransitionRoute.targetPlaybook`. Since the
+`TransitionRoute` is **the same message** in the three places it lives (the page, the
+flow's router and the route group), the gap repeats in all three, and the MCP covers all
+three:
 
-* **Radio**: las rutas de nivel flow **se heredan a todas las páginas del flow**
-  (y las de página tienen prioridad sobre ellas). Solo las rutas de flow **con
-  intent** se heredan; las solo-condición aplican en la entrada del flow.
-* **Runtime**: las ejecuta en los dos niveles (medido con un playbook de marca
-  propia: `matchType=PLAYBOOK`, `currentPlaybooks=[el playbook nuevo]` y la
-  respuesta fue su texto exacto).
-* **Escrituras**: 1 (flow, con intent) frente a N (una por página).
+| level | covers | what it enables |
+|---|---|---|
+| **page** | `cx_set_route_playbook` | "given a condition on THIS page -> playbook X" |
+| **flow** | `cx_set_flow_route_playbook` | "**on entering** this flow -> playbook X" (impossible via the public API: a flow is only entered with `targetFlow` or `Agent.startFlow`) |
+| **route group** | `cx_set_group_route_playbook` | one route shared by several pages -> playbook X |
 
-⚠️ **`verificado: true` es una comprobación de API, no de runtime.** El runtime
-de CX va **por detrás** de la API: después de revertir una ruta y borrar un
-playbook, el GET mostraba el estado limpio pero el runtime siguió ejecutando
-la ruta vieja (`HTTP 404 "Action with id <playbook borrado> not found"`) hasta
-sincronizarse. Consecuencia práctica: **no borres un playbook al que apunte
-una ruta sin quitar antes la ruta.**
+Measured behavioural differences:
+
+* **Scope**: flow-level routes are **inherited by every page of the flow** (page-level
+  routes take priority over them). Only flow routes **with an intent** are inherited;
+  condition-only ones apply at flow entry.
+* **Runtime**: it runs at both levels (measured with a playbook with its own marker:
+  `matchType=PLAYBOOK`, `currentPlaybooks=[the new playbook]`, and the response was its
+  exact text).
+* **Writes**: 1 (flow, with intent) versus N (one per page).
+
+⚠️ **`verified: true` is an API check, not a runtime check.** The CX runtime runs
+**behind** the API: after reverting a route and deleting a playbook, the `GET` showed a
+clean state while the runtime kept executing the old route (`HTTP 404 "Action with id
+<deleted playbook> not found"`) until it caught up. Practical consequence: **do not
+delete a playbook that a route points at without removing the route first.**
+
+### Method gaps: endpoints in no descriptor
+
+The public *discovery doc* and the internal backend's one are **the same document**: both
+669,652 bytes and the **same canonical md5**
+`29adf74f6e0f0e4dede7fefeb5de774e` (the only difference is the **order of the JSON
+keys**). The same 162 methods in v3beta1. In other words: **no method is "missing"**
+from the descriptor. What is missing are the **endpoints the console uses and that are in
+neither of them**. They were found by capturing the console's real traffic (444
+requests) and replaying each one by hand:
+
+| endpoint | version | what it is for | state |
+|---|---|---|---|
+| `GET /projects` | `v3alpha1` | the project list (the console's project picker); it calls it with `filter=id="…"` and `view=FULL` | ✅ 200 |
+| `systemEntityTypes:list` | `v3alpha1` | the system entity types (`sys.date`, `sys.date-period`…) | ✅ 200 |
+| `agents/{a}/currentUsers` | `v3alpha1` | who currently has access to the agent | ✅ 200 |
+| `users/me/userSettings/recentProjects` | `v3alpha1` | the projects you opened recently (**absolute path from the root**) | ✅ 200 |
+| `agents/{a}:listAvailableModels` | `v3alpha1` | the available generative models and their limits | ✅ 200 |
+| `agents/{a}:getSupportedLanguages` | `v3alpha1` | the languages the agent supports | ✅ 200 |
+| `projects/{p}/agent/visibility` | `v2beta1` | agent visibility (**without `locations`**) | ✅ 200 (empty) |
+| `projects/{p}/locations/{l}/conversationProfiles` | `v2beta1` | the conversation profiles of the old CX model | ✅ 200 |
+| `projects/{p}/locations/{l}/locationSettings` | `v3` | settings at location level | ⚠️ 404 if the project does not have them |
+
+They are reachable with `cx_api` (with `version=` and absolute paths) or directly with
+`cx_endpoints_consola(endpoint="…")`.
+
+> **The console speaks `v3alpha1`**, not v3beta1. That is why `cx_api` accepts
+> `version=`: there is data (and endpoints) that only come out in another version.
 
 ---
 
-## Instalación
+## Install
 
 ```bash
-git clone https://github.com/<TU-USUARIO>/dialogflow-cx-mcp.git
+git clone https://github.com/cristoferfuentes/dialogflow-cx-mcp.git
 cd dialogflow-cx-mcp
 python3 -m venv .venv
 .venv/bin/pip install -e .
-cp .env.example .env      # y rellenarlo (ver abajo)
+cp .env.example .env      # then fill it in (see below)
 ```
 
-O, sin instalar el paquete:
+Or, without installing the package:
 
 ```bash
 .venv/bin/pip install "mcp>=1.2"
@@ -155,148 +305,200 @@ O, sin instalar el paquete:
 
 ---
 
-## Cómo obtener las credenciales
+## Get the credentials
 
-El MCP autentica contra el backend interno de la consola con **primera parte**:
-las cookies de sesión de tu navegador de Google. No hace falta token de servicio.
+The MCP authenticates against the console's internal backend with **first-party**
+authentication: your Google browser session cookies. No service account token needed.
 
-### 1. Abre la consola con tu sesión iniciada
+### 1. Open the console with your session signed in
 
-Entra en la consola de Conversational Agents con la cuenta que tiene acceso al
-proyecto (la misma que usas en la UI):
+Sign in to the Conversational Agents console with the account that has access to the
+project (the same one you use in the UI):
 
 ```
-https://conversational-agents.cloud.google.com/projects/<PROYECTO>/locations/global/agents/<AGENTE>
+https://conversational-agents.cloud.google.com/projects/<PROJECT>/locations/global/agents/<AGENT>
 ```
 
-### 2. Abre DevTools y busca una petición al backend
+### 2. Open DevTools and find a request to the backend
 
-`F12` → pestaña **Network** → marca **Preserve log** → **recarga** la página.
-Filtra por `clients6.google.com` (o `dialogflow`). Verás peticiones como:
+`F12` -> **Network** tab -> tick **Preserve log** -> **reload** the page.
+Filter by `clients6.google.com` (or `dialogflow`). You will see requests like:
 
 ```
 GET https://dialogflow.clients6.google.com/v3beta1/projects/.../agents/.../flows?key=AIzaSy...
 ```
 
-### 3. Copia la cabecera `Cookie`
+### 3. Copy the `Cookie` header
 
-Clic en esa petición → **Request Headers** → copia **todo** el valor de la
-cabecera `Cookie` (no solo `SAPISID`). Tendrá esta forma:
+Click that request -> **Request Headers** -> copy the **whole** value of the `Cookie`
+header (not just `SAPISID`). It looks like this:
 
 ```
 SAPISID=XXXX; SID=YYYY; HSID=ZZZZ; SSID=WWWW; APISID=VVVV; ...
 ```
 
-### 4. Pégalo en el `.env`
+### 4. Paste it into the `.env`
 
 ```bash
 CXP_COOKIE="SAPISID=XXXX; SID=YYYY; HSID=ZZZZ; SSID=WWWW; APISID=VVVV; ..."
 ```
 
-Las **5 cookies que hacen falta** son `SAPISID`, `SID`, `HSID`, `SSID` y `APISID`
-(medido: con 4 de 5 el backend responde **401**; con cookies de otros dominios
-también). Si te da 401, copia la cabecera `Cookie` **entera** otra vez: puede que
-el orden o alguna cookie extra importen.
+The **5 minimum cookies** are `SAPISID`, `SID`, `HSID`, `SSID` and `APISID` (measured:
+with 4 of 5 the backend answers **401**).
 
-### 5. La API key
+⚠️ **But the header has to be COMPLETE, not just those 5.** Measured (2026-11-13) with
+the same binary and the same `.env`: with only `SAPISID, SID, HSID, SSID, APISID` the
+response is **401 "Request had invalid authentication credentials"**; with the **23
+cookies** of `.google.com` (the header as-is, including `__Secure-*PSIDTS`,
+`__Host-GAPS`, `SIDCC`, `OSID`…) the very same call answers **200**. Session cookies are
+revalidated, and if the MCP only sends 5 of 23 it gets locked out exactly when the
+session renews.
 
-`CXP_API_KEY` es la clave pública que usa la consola de Google. La puedes leer en
-la propia URL de la petición del paso 2: es el parámetro `key=`. El valor por
-defecto del ejemplo es el de la consola de Dialogflow.
+The MCP **sends every** cookie it finds in `CXP_COOKIE`; the 5 are only used as a sanity
+check (`missing_cookies()`). If you get a 401, copy the `Cookie` header **again**, whole.
 
-### Alternativa: `storage_state` de Playwright
+### 5. The API key
 
-Si ya tienes un `storage_state` (un JSON con `cookies`), ponlo en
-`CXP_SESSION_FILE` y el MCP extrae las 5 cookies solo. La cookie debe ser de
-dominio `.google.com`.
+`CXP_API_KEY` is the public key used by the Google console. You can read it in the URL
+of the request from step 2: it is the `key=` parameter. The example value is the
+Dialogflow console's own key.
+
+### Alternative: a Playwright `storage_state`
+
+If you already have a `storage_state` (a JSON with `cookies`), point `CXP_SESSION_FILE`
+at it and the MCP extracts **all** the `.google.com` cookies (not just the 5). The
+cookies must belong to the `.google.com` domain.
 
 ---
 
-## Referencia del `.env`
+## Environment variables
 
-| variable | obligatorio | para qué |
+| variable | required | what it is for |
 |---|---|---|
-| `CXP_PROJECT` | sí | id del proyecto de Google Cloud (por defecto en las llamadas) |
-| `CXP_LOCATION` | no (`global`) | location de Dialogflow CX |
-| `CXP_CONSOLE_ORIGIN` | no | origen de la consola; entra en la firma `SAPISIDHASH` |
-| `CXP_API_KEY` | sí | API key de la consola (el `key=` de las peticiones) |
-| `CXP_COOKIE` | sí | cabecera `Cookie` copiada del navegador |
-| `CXP_SAPISID`, `CXP_SID`, `CXP_HSID`, `CXP_SSID`, `CXP_APISID` | alternativa | las cookies por separado |
-| `CXP_SESSION_FILE` | alternativa | `storage_state` de Playwright del que extraerlas |
-| `CXP_API_VERSION` | no (`v3beta1`) | versión del proto del backend interno |
-| `CXP_DEFAULT_AGENT` | no | agente con el que se trabaja si no se indica |
-| **`CXP_AGENT_READ`** | — | agentes con permiso de **lectura** |
-| **`CXP_AGENT_READWRITE`** | — | agentes con permiso de **lectura y escritura** |
-| `CXP_PROJECTS` | no | (opcional) limita los proyectos permitidos |
-| `CXP_READ_ONLY_AGENTS` | no | (legacy) se une a `CXP_AGENT_READ` |
+| `CXP_PROJECT` | yes | Google Cloud project id (the default for calls) |
+| `CXP_LOCATION` | no (`global`) | Dialogflow CX location |
+| `CXP_QUOTA_PROJECT` | no | project used for the `x-goog-user-project` header; defaults to `CXP_PROJECT` |
+| `CXP_CONSOLE_ORIGIN` | no | console origin; it takes part in the `SAPISIDHASH` signature |
+| `CXP_API_KEY` | yes | console API key (the `key=` of the requests) |
+| `CXP_COOKIE` | yes | `Cookie` header copied from the browser (**complete**, not just the 5) |
+| `CXP_SAPISID`, `CXP_SID`, `CXP_HSID`, `CXP_SSID`, `CXP_APISID` | alternative | the cookies one by one (only for the signature) |
+| `CXP_SESSION_FILE` | alternative | Playwright `storage_state` to extract them from |
+| `CXP_API_VERSION` | no (`v3beta1`) | proto version of the internal backend |
+| `CXP_DEFAULT_AGENT` | no | the agent to work on when none is given |
+| **`CXP_AGENT_READ`** | — | agents allowed to **read** |
+| **`CXP_AGENT_READWRITE`** | — | agents allowed to **read and write** |
+| `CXP_PROJECTS` | no | (optional) restricts the allowed projects |
+| `CXP_READ_ONLY_AGENTS` | no | (legacy) merged into `CXP_AGENT_READ` |
+| `CXP_ENV_FILE` | no | path to the `.env` to load (searched first) |
+| `CXP_DISPLAY` | no (`:99`) | X display of the login helper (outside the MCP) |
+| `CXP_CDP_PORT` | no (`9222`) | Chrome DevTools port of the login helper |
+| `CXP_NOVNC_URL` | no | noVNC URL of the login helper |
+| `CXP_PROBE_AGENTS`, `CXP_PROBE_TARGETS` | no | agent/flow/page ids used by the probes (never hardcoded) |
 
-Se busca el `.env` en: `CXP_ENV_FILE` → la raíz del paquete → el directorio actual →
-`~/.config/cx-playbook.env`. Las variables de entorno `CXP_*` tienen prioridad sobre
-el fichero (**no se fusionan**: una variable de entorno *reemplaza* al valor del
-`.env`).
+The `.env` is looked up in: `CXP_ENV_FILE` -> the package root -> the current directory
+-> `~/.config/cx-playbook.env`. `CXP_*` environment variables take priority over the file
+(**they do not merge**: an environment variable *replaces* the `.env` value).
 
-### Permisos por agente (lista blanca)
+### Per-agent permissions (allowlist)
 
-Un agente **sin** entrada en `CXP_AGENT_READ` ni en `CXP_AGENT_READWRITE` **no es
-accesible en absoluto** (ni para leer). Las entradas admiten dos formas:
+An agent **without** an entry in `CXP_AGENT_READ` nor in `CXP_AGENT_READWRITE` is **not
+accessible at all** (not even for reading). Entries accept two forms:
 
-- `<uuid>` → el permiso viaja con el uuid: vale en cualquier proyecto.
-- `<proyecto>/<uuid>` → empareja proyecto y agente.
+- `<uuid>` -> the permission travels with the uuid: it is valid in any project.
+- `<project>/<uuid>` -> matches project and agent together.
 
-El proyecto se deduce del **path de la petición**, no de `CXP_PROJECT`: así el mismo
-MCP puede leer un agente de PROD (que vive en otro proyecto) sin abrirle la escritura.
+The project is deduced from the **request path**, not from `CXP_PROJECT`: that way the
+same MCP can read an agent in PROD (which lives in another project) without opening write
+access to it.
 
-> **REGLA DURA:** `CXP_AGENT_READWRITE` debe contener **SOLO tu copia** del agente.
-> Nunca el agente de referencia ni el de producción: editar un playbook que no sea
-> tu copia rompería la paridad con la consola.
+> **HARD RULE:** `CXP_AGENT_READWRITE` must contain **ONLY your own copy** of the agent.
+> Never the reference agent nor the production one: editing a playbook that is not your
+> copy would break parity with the console.
 
-La guarda compara el **id resuelto** (no un alias) y se aplica en la **capa baja**
-(`cxp/console_api.py`), no solo en la capa MCP: un `PATCH` que se cuele por
-`cx_api` también pasa por el control de permisos. Concretamente:
+The guard compares the **resolved id** (not an alias) and is enforced in the **low
+layer** (`cxp/console_api.py`), not only in the MCP layer: a `PATCH` that slips through
+`cx_api` also goes through the permission check. Specifically:
 
-- `ConsoleApi.request()` deduce el agente del **path** de la petición y aplica
-  `assert_writable` a todo verbo de escritura (`POST/PATCH/PUT/DELETE`) y
-  `assert_readable` al resto.
-- `assert_playbook_writable()` exige `CXP_AGENT_READWRITE` para tocar un playbook.
-- Ningún camino (ni el passthrough genérico) puede saltarse la lista blanca.
+- `ConsoleApi.request()` deduces the agent from the **path** of the request and applies
+  `assert_writable` to every write verb (`POST/PATCH/PUT/DELETE`) and `assert_readable`
+  to the rest.
+- `assert_playbook_writable()` requires `CXP_AGENT_READWRITE` to touch a playbook.
+- No path (not even the generic passthrough) can bypass the allowlist.
 
 ---
 
-## Registro en un cliente MCP
+## Register it in an MCP client
+
+The server speaks **stdio**, so any MCP client that can launch a command works. The
+`env` block is **not optional**: the MCP SDK does not inherit the environment of the
+parent process, so without it the server would not find your credentials.
 
 ```json
 {
   "mcpServers": {
-    "cx-playbook": {
-      "command": "/ruta/a/mcp-cx-playbook/.venv/bin/python",
-      "args": ["/ruta/a/mcp-cx-playbook/server.py"],
-      "env": { "CXP_ENV_FILE": "/ruta/a/mcp-cx-playbook/.env" }
+    "dialogflow-cx-mcp": {
+      "command": "/path/to/dialogflow-cx-mcp/.venv/bin/python",
+      "args": ["/path/to/dialogflow-cx-mcp/server.py"],
+      "env": { "CXP_ENV_FILE": "/path/to/dialogflow-cx-mcp/.env" }
     }
   }
 }
 ```
 
-> OJO: el SDK de MCP **no hereda el entorno del proceso padre** (usa un subconjunto
-> seguro: `PATH`, `HOME`…). Si el cliente no pasa `env`, el servidor solo ve lo que
-> haya en `CXP_ENV_FILE`.
+> NOTE: the MCP SDK **does not inherit the parent process environment** (it uses a safe
+> subset: `PATH`, `HOME`…). If the client does not pass `env`, the server only sees
+> what is in `CXP_ENV_FILE`.
+
+Common clients:
+
+| client | where the server is configured |
+|---|---|
+| Claude Desktop | `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows) |
+| Claude Code | `claude mcp add dialogflow-cx-mcp -- /path/to/.venv/bin/python /path/to/server.py` |
+| Cursor | `~/.cursor/mcp.json` |
+| VS Code (Copilot) | `.vscode/mcp.json` in the workspace, or your user `settings.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Any other client | the `mcpServers` block above |
+
+If you prefer to keep the credentials in the environment instead of a file, replace the
+`env` block with the `CXP_*` variables themselves — the environment variables have
+priority over the `.env` file.
 
 ---
 
-## Herramientas
+## Tools
 
-### Espejo genérico
+> The tool payloads keep the field names they have always had (`permisos`, `rutas`,
+> `verificado`, `destino_actual_nombre`, …) so that existing prompts keep working.
 
-| herramienta | qué hace |
+### Generic mirror
+
+| tool | what it does |
 |---|---|
-| `cx_status` | configuración, **tabla de permisos** y salud del backend (GET real) |
-| `cx_discover` | el mapa de la API: sale del **discovery doc oficial** del backend (162 métodos / 32 recursos en v3beta1). `filter="flows"`, `method="agents.flows.train"` |
-| `cx_api` | **cualquier** método de v3beta1, 1:1: `method="agents.playbooks.patch"` o `method="GET", path="agents/{agent}/flows"` |
+| `cx_status` | configuration, the **permission table** and backend health (a real GET) |
+| `cx_discover` | the API map, taken from the backend's **official discovery doc** (162 methods / 32 resources in v3beta1). `filter="flows"`, `method="agents.flows.train"` |
+| `cx_api` | **any** method, 1:1, **in any version**: `method="agents.playbooks.patch"` or `method="GET", path="agents/{agent}/flows"`, with `version="v3alpha1"` |
+| `cx_endpoints_consola` | the endpoints the console uses and that **are in no descriptor**, and that `cx_api` could not reach |
 
-`cx_api` cubre el 100 % de la superficie (los 162 métodos), incluidas las
-operaciones que no están tipadas: `environments`, `deployments`, `experiments`,
-`testCases`, `versions`, `export`/`import`, `operations`…
+`cx_api` covers 100 % of the surface (the 162 v3beta1 methods), including the operations
+that are not typed: `environments`, `deployments`, `experiments`, `testCases`,
+`versions`, `export`/`import`, `operations`…
 
-### Tipadas del núcleo
+#### Paths and versions in `cx_api`
+
+One single rule, the same for everything (it lives in `cxp/endpoint.py`):
+
+| path you pass | what happens |
+|---|---|
+| `agents/{agent}/flows` | **relative**: `projects/{project}/locations/{location}/` is prepended |
+| `projects/other/agent/visibility` | **absolute**: it already carries the project, it is left alone |
+| `/users/me/userSettings/recentProjects` | **absolute from the root**: it does not hang off a project (it starts with `/`) |
+| `v3alpha1/projects/p/...` | additionally **pins the version** of the call |
+
+`version=` (or the path prefix) chooses the proto: `v3beta1`, `v3alpha1`, `v3`,
+`v2beta1`. The backend serves all four with the same descriptor.
+
+### Typed core tools
 
 `cx_list_agents`, `cx_get_agent`, `cx_update_agent`, `cx_list_flows`,
 `cx_get_flow`, `cx_update_flow`, `cx_list_pages`, `cx_get_page`,
@@ -305,151 +507,227 @@ operaciones que no están tipadas: `environments`, `deployments`, `experiments`,
 transitionRouteGroups / generators / changelogs / conversations),
 `cx_get_conversation`, `cx_detect_intent`, `cx_train_flow`, `cx_validate_flow`.
 
-### Los huecos de la API pública
+### The public API gaps
 
-| herramienta | qué hace |
+| tool | what it does |
 |---|---|
-| `cx_gaps` | **detecta en vivo** los campos que el backend expone y la API pública no declara. Trae además el catálogo medido (qué huecos se pueden escribir y cuáles son solo lectura) |
-| `cx_set_console_field` | **escribe cualquier campo** (incluidos los fuera de esquema) por ruta: `transitionRoutes[0].targetPlaybook`, `form.parameters[0].description`, `entities[0].dtmfPattern`… Verifica releyendo y dice qué se guardó y qué se perdió |
-| `cx_set_route_playbook` | destino a playbook de una transition route **de página** |
-| `cx_set_flow_route_playbook` | destino a playbook de una transition route **del router de un flow** |
-| `cx_set_group_route_playbook` | destino a playbook de una transition route **de un grupo de rutas** |
+| `cx_gaps` | **detects live** the fields the backend exposes and the public API does not declare. It walks **every** collection of the descriptor (24 in v3beta1, including the nested ones), and also returns the measured catalogue (which gaps are writable and which are read-only) and the **method** gaps. With `incluir_lab=True` it also sweeps the `environments*` family (and `testCases*`) in a **temporary lab agent** -> coverage **23/24** |
+| `cx_proto_interno` | the **systematic** list of gaps: the fields the console's **internal** proto has and the public descriptor does not declare (14 schemas, 38 fields), with the write state of each one **measured** (all 38 measured: 19 writable, 12 ignored by the backend, 2 dropped, 2 input-only, 2 not accepted, 1 derived) |
+| `cx_endpoints_consola` | the **measured** catalogue of the endpoints the console calls and that **are in no descriptor** (`GET /projects`, `systemEntityTypes:list`, `currentUsers`, `:listAvailableModels`, `:getSupportedLanguages`, `users/me/userSettings/recentProjects`, `agent/visibility`, `conversationProfiles`, `locationSettings`), plus the call to any of them |
+| `cx_set_console_field` | **writes any field** (including out-of-schema ones) by path: `transitionRoutes[0].targetPlaybook`, `form.parameters[0].description`, `entities[0].dtmfPattern`… It verifies by reading back and says what was saved and what was lost |
+| `cx_set_route_playbook` | playbook target of a **page** transition route |
+| `cx_set_flow_route_playbook` | playbook target of a **flow router** transition route |
+| `cx_set_group_route_playbook` | playbook target of a **route group** transition route |
 
-`cx_gaps` es la pieza que **no depende de esta lista**: recorre el agente, compara
-cada recurso con el esquema público y devuelve lo que encuentra. Si mañana Google
-añade un campo nuevo a la consola, sale en `cx_gaps` sin tocar el código.
+`cx_gaps` is the part that **does not depend on that list**: it walks the agent, compares
+every resource with the public schema and returns what it finds. If Google adds a new
+field to the console tomorrow, it shows up in `cx_gaps` without touching the code.
 
-`cx_set_console_field` es la pieza **genérica** de escritura: en vez de un método
-por operación, hay una sola:
+The walk is **generic**: it comes from the descriptor (`colecciones_listables()`), not
+from a hand-written list. It covers the 24 collections v3beta1 declares — flat
+(`intents`, `tools`, `playbooks`, `webhooks`, `generators`, `entityTypes`, `changelogs`,
+`conversations`…) and **nested** (`flows.pages`, `tools.versions`,
+`playbooks.versions`, `playbooks.examples`, `flows.versions`,
+`flows.transitionRouteGroups`, `testCases`, `testCases.results`,
+`environments`, `environments.deployments`, `environments.experiments`,
+`environments.continuousTestResults`, `environments.sessions.entityTypes`,
+`sessions.entityTypes`)—. For the nested ones the ancestor has to be resolved
+(`flows.pages` needs a flow): up to `max_padres` candidates are tried, so that a flow
+without pages does not mask one that has them.
 
-```
-GET recurso  ->  se aplica el valor en la ruta  ->  PATCH  ->  GET y compara
-```
+The output says **what was covered and what was not** (`cobertura` and `sin_alcanzar`):
+an agent not having `environments` is not an MCP failure, it means the resource does not
+exist there.
 
-La comparación final es la garantía: el servidor puede descartar un campo en
-silencio (es lo que hace la API pública), y la respuesta lo dice
-(`verificado`, `descartado_por_el_servidor`, `cambios`).
+### Full coverage (`incluir_lab=True`)
 
-### Clonado 1:1 de un agente (el canal completo)
+Six collections hang off resources a normal agent does not have, and the generic sweep
+cannot invent them:
 
-| herramienta | qué hace |
+| collection | why it is not reachable in the working agent |
 |---|---|
-| `cx_clone_agent` | **limpia el destino y recrea el original 1:1**, con benchmark por acción |
-| `cx_limites_api` | **la memoria del MCP**: los límites medidos de la API (síntoma → causa → rodeo) |
-| `cx_net_probe` | dónde se va el tiempo de cada petición (send / cabeceras / cuerpo) |
-| `cx_batch` | N llamadas agrupadas: el `/batch` del backend **no existe** (404) → **cae a hilos** y lo dice en `modo` |
+| `environments`, `.deployments`, `.experiments`, `.continuousTestResults`, `.sessions.entityTypes` | they hang off an **environment**, and one has to be created |
+| `testCases`, `testCases.results` | they hang off a **test case**, and one has to be created and run |
 
-`cx_clone_agent(origen, destino, modo="aplicar"|"plan"|"limpiar")`:
+`cx_gaps(incluir_lab=True)` creates a **temporary lab agent** (one flow, one page, no
+system tools), sweeps it **completely** and **deletes** it when finished.
 
-- `modo="aplicar"` (por defecto): snapshot del original → limpieza del destino
-  → recreación 1:1 → verificación (conteos **y** firma de routing por página).
-- `modo="plan"`: no escribe nada; dice qué se borraría y qué se crearía.
-- `modo="limpiar"`: solo la limpieza del destino.
+**The three rules for creating an environment** (measured 2026-11-15; the public
+descriptor does not state them, which is why the `create` fails):
 
-Devuelve el **benchmark**: `ms_total`, `ms_fases` (tiempo de reloj por fase),
-`ms_suma_por_fase` (suma de las llamadas), `limpiar`, `crear`, `paridad`,
-`omitidos`, `desviaciones` y **todas las acciones una a una con su tiempo**.
+1. You must include the **version of every flow** of the agent, and also the one of the
+   *start flow*: `"Version must be provided for start flow resource"`.
+2. And the **version of every playbook** the graph references (transitive closure):
+   `"Playbook 'P' is referenced in version 'V' of flow 'F', but not included in the
+   environment"`.
+3. And the **version of the tools** those playbooks reference.
 
-Solo escribe en el **destino**: el original es de solo lectura y la guarda lo
-bloquea en la capa baja (`cxp/console_api.py`), también dentro de `cx_api`.
+The trick (and the finding): **`versionConfigs[].version` is not just a flow**. It is a
+**generic** resource name: it also accepts `.../playbooks/{id}/versions/{v}` and
+`.../tools/{id}/versions/{v}`. With that, the server's error **advances to the next
+level** and so the whole chain is discovered.
 
-#### Orden de creación (lo dicta el servidor, no la conveniencia)
+> ⚠️ **The working agent CANNOT have an environment**: its graph references
+> `df-code-interpreter-tool` (a system tool), which cannot be versioned
+> (`POST tools/…/versions` -> 404 *"does not exist in the agent"*), has no versions,
+> and its name does not match the version template. That is why the `environments*`
+> sweep is done in the lab agent.
+
+With `incluir_lab=True` coverage is **23/24**: the remaining one (`sessions.entityTypes`
+at agent level) **does not exist in the internal proto** — its real name is
+`projects/*/…/environments/*/sessions/*/entityTypes/*`, and at agent level it gives a
+404. The sweep marks it with its environment-level equivalent.
+
+What shows up once those six collections are covered (and **was not** visible before):
+
+| gap | why it matters |
+|---|---|
+| `Environment.etag` | the public `Environment` proto does not declare it (the server computes it) |
+| `TestRunDifference.actualValue` / `.expectedValue` / `.assertionType` / `.warning` | the public proto only declares `type` and `description`: through the public API **you cannot know what differs** in a failed test case |
+
+`cx_set_console_field` is the **generic** writing part: instead of one method per
+operation, there is a single one:
 
 ```
-entityTypes, intents, webhooks, tools   (hojas)
-  -> flows        (con las rutas que ya son resolubles; si apuntan a una
-                   pagina o un playbook, van en un PATCH posterior)
-  -> playbooks    (referencian tools y flows; se referencian ENTRE si)
+GET resource  ->  the value is applied on the path  ->  PATCH  ->  GET and compare
+```
+
+The final comparison is the guarantee: the server may drop a field silently (that is
+what the public API does), and the response says so (`verificado`,
+`descartado_por_el_servidor`, `cambios`).
+
+### 1:1 agent cloning (the full channel)
+
+| tool | what it does |
+|---|---|
+| `cx_clone_agent` | **cleans the destination and recreates the original 1:1**, with a per-action benchmark |
+| `cx_limites_api` | **the MCP's memory**: the measured limits of the API (symptom -> cause -> workaround) |
+| `cx_net_probe` | where the time of each request goes (send / headers / body) |
+| `cx_batch` | N grouped calls: the backend's `/batch` **does not exist** (404) -> **falls back to threads** and says so in `modo` |
+
+`cx_clone_agent(source, destination, mode="apply"|"plan"|"clean")`:
+
+- `mode="apply"` (default): snapshot of the original -> clean the destination -> 1:1
+  recreation -> verification (counts **and** a per-page routing signature).
+- `mode="plan"`: writes nothing; it says what would be deleted and what would be created.
+- `mode="clean"`: only cleans the destination.
+
+It returns the **benchmark**: `ms_total`, `ms_fases` (wall-clock time per phase),
+`ms_suma_por_fase` (sum of the calls), `limpiar`, `crear`, `paridad`, `omitidos`,
+`desviaciones` and **every action one by one with its time**.
+
+It only writes to the **destination**: the original is read-only and the guard blocks it
+in the low layer (`cxp/console_api.py`), including inside `cx_api`.
+
+#### Creation order (dictated by the server, not by convenience)
+
+```
+entityTypes, intents, webhooks, tools   (leaves)
+  -> flows        (with the routes that are already resolvable; if they point to a
+                   page or a playbook, they go in a later PATCH)
+  -> playbooks    (they reference tools and flows; they reference EACH OTHER)
   -> generators
-  -> paginas      (orden topologico; los ciclos se rompen parcheando)
-  -> PATCH de rutas de flow y de las paginas con destinos pendientes
-  -> PATCH de ajustes del agente
+  -> pages        (topological order; cycles are broken by patching)
+  -> PATCH of the flow routes and of the pages with pending targets
+  -> PATCH of the agent settings
 ```
 
-Los ids se **remapean** (los del original no existen en el destino): cada
-nombre de recurso se reescribe par a par (`recurso/id`), incluidos los
-anidados (`.../flows/{flow}/pages/{page}` y el destino especial `END_FLOW`).
+Ids are **remapped** (the original's do not exist in the destination): every resource
+name is rewritten pairwise (`resource/id`), including the nested ones
+(`.../flows/{flow}/pages/{page}` and the special `END_FLOW` target).
 
 ---
 
-## Instrucciones para el agente que usa este MCP
+## Instructions for the agent using this MCP
 
-> Copia este bloque en el prompt/sistema del agente que consume el MCP.
+> Copy this block into the prompt/system message of the agent that consumes the MCP.
 
-**Purpose.** Operar Dialogflow CX como un espejo de su API v3beta1, y además
-escribir los campos que la API pública no puede expresar (destino a playbook
-en una transición, descripciones de parámetros de formulario, patrones DTMF,
-ajustes del cliente web) y **detectar** los que faltan.
+**Purpose.** Operate Dialogflow CX as a mirror of its v3beta1 API, and additionally
+write the fields the public API cannot express (playbook target on a transition, form
+parameter descriptions, DTMF patterns, web client settings) and **detect** the ones that
+are missing.
 
-**Antes de la primera llamada:** llama a `cx_status`. Si `credenciales_ok` es
-`false` o `sesion_aceptada` es `false`, **no sigas**: las credenciales están mal
-o la sesión de Google caducó. Avisa al usuario (no hay forma de arreglarlo desde
-el MCP).
+**Before the first call:** call `cx_status`. If `credenciales_ok` is `false` or
+`sesion_aceptada` is `false`, **stop**: the credentials are wrong or the Google session
+expired. Tell the user (there is no way to fix it from the MCP).
 
-**Si vas a escribir mucho (o a clonar):** llama a `cx_limites_api()` **antes**.
-Ahí está la memoria del MCP: los límites medidos de la API (síntoma exacto →
-causa → rodeo) y las constantes de rendimiento. **No re-descubras lo que ya
-está medido**: el descriptor oficial no los documenta.
+**If you are going to write a lot (or to clone):** call `cx_limites_api()` **first**.
+There is the MCP's memory: the measured limits of the API (exact symptom -> cause ->
+workaround) and the performance constants. **Do not re-discover what is already
+measured**: the official descriptor does not document it.
 
-- **El backend serializa las escrituras del mismo agente**: el rendimiento se
-  estanca en ~1,5-2 ops/s sea cual sea la concurrencia. **Crea en serie.** El
-  borrado de elementos independientes admite **2 en paralelo** (+20 %). Las
-  **lecturas sí paralelizan** (8 GET ≈ 1 s).
-- **Menos escrituras > escrituras más rápidas**: como el backend serializa, la
-  única forma de bajar el tiempo total es **escribir menos**.
-- **Verifica al final**, no tras cada escritura (cada GET extra son ~0,5 s).
-- Si un error viene con `causa`/`workaround` en la respuesta, **ese es el rodeo
-  ya conocido**: aplícalo en vez de reintentar a ciegas.
+- **The backend serializes writes to the same agent**: performance stalls at ~1.5-2
+  ops/s whatever the concurrency. **Create in series.** Deleting independent items
+  tolerates **2 in parallel** (+20 %). **Reads do parallelize** (8 GETs ≈ 1 s).
+- **Fewer writes > faster writes**: since the backend serializes, the only way to lower
+  the total time is to **write less**.
+- **Verify at the end**, not after each write (each extra GET is ~0.5 s).
+- If an error comes with `causa`/`workaround` in the response, **that is the known
+  workaround**: apply it instead of retrying blindly.
 
-**Para clonar un agente:** usa `cx_clone_agent(origen, destino)`; lleva el
-orden de dependencias, el remapeo de ids y los rodeos ya resueltos.
+**To clone an agent:** use `cx_clone_agent(source, destination)`; it carries the
+dependency order, the id remapping and the already-solved workarounds.
 
-**Para escribir en un agente que no sea el de por defecto:** comprueba la tabla
-`permisos` de `cx_status`. Un agente sin permiso devuelve un error claro
-(`no tiene permiso`); uno de solo lectura, `SOLO LECTURA`. No busques rodeos.
+**To write to an agent other than the default one:** check the `permisos` table of
+`cx_status`. An agent without permission returns a clear error (`no tiene permiso`); a
+read-only one, `SOLO LECTURA`. Do not look for workarounds.
 
-**Cómo usar `cx_set_route_playbook` (y `cx_set_flow_route_playbook`, y
+**How to use `cx_set_route_playbook` (and `cx_set_flow_route_playbook`, and
 `cx_set_group_route_playbook`):**
 
-1. **Primero lee.** Llama con `agent`, `flow` y **sin `route`**: devuelve el
-   estado actual (cada ruta con su condición y su destino). Con esto eliges la
-   ruta exacta.
-2. **Identifica la ruta** por su `name` (uuid) o por su `condition` exacta. No uses
-   índices si puedes evitarlo: son frágiles.
-3. **Simula.** Llama con `route`, `playbook` y `dry_run=true`. Comprueba
-   `destino_actual` vs `destino_nuevo` y el `aviso`: si la ruta apuntaba a una
-   página o a un flow, ese destino **se borra** (son un `oneof`).
-4. **Escribe.** Repite la llamada con `dry_run=false`.
-5. **Verifica.** La respuesta incluye `verificado: true` y las rutas ya
-   actualizadas. Si `verificado` es `false`, **dilo**: el cambio no está confirmado.
+1. **Read first.** Call with `agent`, `flow` and **without `route`**: it returns the
+   current state (each route with its condition and its target). Use that to pick the
+   exact route.
+2. **Identify the route** by its `name` (uuid) or by its exact `condition`. Avoid
+   indices if you can: they are fragile.
+3. **Simulate.** Call with `route`, `playbook` and `dry_run=true`. Check
+   `destino_actual` vs `destino_nuevo` and the `aviso`: if the route pointed to a page
+   or to a flow, that target **is erased** (they are a `oneof`).
+4. **Write.** Repeat the call with `dry_run=false`.
+5. **Verify.** The response includes `verificado: true` and the already-updated routes.
+   If `verificado` is `false`, **say it**: the change is not confirmed.
 
-**Cómo usar `cx_set_console_field` (un campo fuera de esquema):**
+**How to use `cx_set_console_field` (an out-of-schema field):**
 
-1. **Descubre** el campo con `cx_gaps` (o mira el `catalogo`): te dice el
-   recurso, el esquema y el estado (`escribible` / `derivado`).
-2. **Simula** con `dry_run=true`: devuelve el diff previsto y el `updateMask`
-   que se va a mandar.
-3. **Escribe** con `dry_run=false`.
-4. **Lee** el resultado: `verificado: true` y `descartado_por_el_servidor` (vacío
-   = se guardó). Si el campo aparece en `descartado_por_el_servidor`, el servidor
-   lo deriva: es de solo lectura.
+1. **Discover** the field with `cx_gaps` (or look at the `catalogo`): it tells you the
+   resource, the schema and the state (`escribible` / `derivado`).
+2. **Simulate** with `dry_run=true`: it returns the expected diff and the `updateMask`
+   that will be sent.
+3. **Write** with `dry_run=false`.
+4. **Read** the result: `verificado: true` and `descartado_por_el_servidor` (empty =
+   it was saved). If the field shows up in `descartado_por_el_servidor`, the server
+   derives it: it is read-only.
 
-**Reglas:**
+**Rules:**
 
-- `playbook` se indica por **displayName**. Los ids de playbook son distintos en
-  cada agente.
-- Un cambio de destino **borra** `targetPage`/`targetFlow` de esa ruta (son un `oneof`).
-  Si la ruta tenía destino a página o flow, eso se pierde: avisa antes.
-- El MCP escribe el **array completo** de rutas del recurso en un solo `PATCH`. Si otro
-  proceso edita el mismo flow o página a la vez, tu escritura pisa su cambio. No edites
-  el mismo recurso en paralelo.
-- Cada llamada re-firma la petición (`SAPISIDHASH` con el timestamp actual). No hace
-  falta refrescar nada.
-- Los `targetPlaybook` no se ven por la API pública: para comprobar el resultado usa el
-  `rutas` que devuelve la propia herramienta, no un `GET` público.
-- **Usa `v3beta1`, nunca `v3`**.
+- A `playbook` is given by **displayName**. Playbook ids differ in every agent.
+- Changing a target **erases** that route's `targetPage`/`targetFlow` (they are a
+  `oneof`). If the route had a page or flow target, that is lost: warn beforehand.
+- The MCP writes the **complete array** of routes of the resource in a single `PATCH`.
+  If another process edits the same flow or page at the same time, your write overwrites
+  its change. Do not edit the same resource in parallel.
+- Every call re-signs the request (`SAPISIDHASH` with the current timestamp). There is
+  nothing to refresh.
+- `targetPlaybook` values are not visible through the public API: to check the result,
+  use the `rutas` returned by the tool itself, not a public `GET`.
+- **Use `v3beta1` by default**, never `v3`. But if you need data that only exists in
+  another version (the console speaks `v3alpha1`), pass `version="v3alpha1"` to
+  `cx_api`: it is a single call, not a configuration change.
+- **`detectIntent` needs `languageCode` inside `queryInput`** (not inside
+  `queryInput.text`): without it, HTTP 400. The tool already sets it.
+- **If it returns 401**, the cookie jar is incomplete or expired: `CXP_COOKIE` must
+  carry **all** the `.google.com` cookies, not just the 5.
 
-**Ejemplo de flujo:**
+**When the public API is not enough (method gaps):** the public and internal descriptors
+are identical, so there are no "missing methods" in the descriptor: what is missing are
+endpoints that **the console uses and that are in neither**
+(`systemEntityTypes:list`, `currentUsers`, `:listAvailableModels`,
+`:getSupportedLanguages`, `users/me/userSettings/recentProjects`,
+`agent/visibility`, `conversationProfiles`, `locationSettings`). Call
+`cx_endpoints_consola()` to see the measured catalogue and
+`cx_endpoints_consola(endpoint="…")` to invoke one.
+
+**Example flow:**
 
 ```
 cx_status()
@@ -460,19 +738,29 @@ cx_discover(filter="playbook")
   -> total_metodos: 162
 
 cx_gaps(agent="<uuid>")
-  -> total_huecos: 25
+  -> total_huecos: 29
   -> huecos: [{esquema: "Tool", campo: "actionSchemas", ...}, ...]
   -> catalogo: [{campo: "transitionRoutes[].targetPlaybook", estado: "escribible"}, ...]
+  -> cobertura: {colecciones_del_descriptor: 24, colecciones_alcanzadas: 22, ...}
 
-cx_get_flow(agent="<uuid>", flow="Mi_Flujo")
+cx_gaps(agent="<uuid>", incluir_lab=True)
+  -> cobertura: {colecciones_del_descriptor: 24, colecciones_alcanzadas: 23, ...}
+  -> laboratorio: {agente_temporal: "...", errores: []}   # created and deleted
+  -> huecos_de_metodo: [{id: "systemEntityTypes.list", version: "v3alpha1", ...}, ...]
+
+cx_endpoints_consola(endpoint="agents.listAvailableModels")
+  -> estado: "ok"
+  -> datos: {generativeAgentModelConfig: {generativeAgentModels: [...]}}
+
+cx_get_flow(agent="<uuid>", flow="My_Flow")
   -> rutas: [{name: "…", condition: "$session.params.canal = whatsapp",
               target_kind: "targetPage", target_name: "26d926f7-…"}, …]
 
-cx_set_flow_route_playbook(agent="<uuid>", flow="Mi_Flujo",
-                            route="<uuid-de-la-ruta>",
-                            playbook="mi_playbook_destino", dry_run=true)
-  -> destino_actual_nombre: mi_playbook_anterior
-     destino_nuevo_nombre:  mi_playbook_destino
+cx_set_flow_route_playbook(agent="<uuid>", flow="My_Flow",
+                            route="<route-uuid>",
+                            playbook="my_target_playbook", dry_run=true)
+  -> destino_actual_nombre: my_previous_playbook
+     destino_nuevo_nombre:  my_target_playbook
 
 (cx_set_flow_route_playbook(..., dry_run=false))
   -> verificado: true
@@ -480,156 +768,294 @@ cx_set_flow_route_playbook(agent="<uuid>", flow="Mi_Flujo",
 
 ---
 
-## Límites medidos de la API
+## Measured API limits
 
-`cx_limites_api()` los devuelve con el **síntoma exacto**, la causa y el rodeo;
-el pipeline de clonado **anota solo** cada error con su causa y su rodeo. Lo
-que la API **no** documenta (el descriptor oficial no lo dice):
+`cx_limites_api()` returns them with the **exact symptom**, the cause and the
+workaround; the cloning pipeline **annotates** each error with its cause and its
+workaround. What the API **does not document** (the official descriptor does not say
+it):
 
-| id | lo que pasa | rodeo |
+| id | what happens | workaround |
 |---|---|---|
-| `delete_force` | `DELETE` de un recurso referenciado → 400 *"Please set 'force' to true"* | `force=true` en flows/tools/webhooks/entityTypes/generators/transitionRouteGroups (**no** en playbooks ni intents) → borrar por orden de dependencias |
-| `escrituras_serializadas` | el rendimiento se estanca: POST 1→1,57 · 2→1,01 · 3→1,03 · 4→1,34 · 6→1,14 · 8→1,12 ops/s | **crear en serie**; el **borrado** sí admite **2 en paralelo** (+20 %) |
-| `batch_404` | `/v3beta1/batch` → **404** en el backend interno | `cx_batch` cae a **hilos**; nunca cuentes con `/batch` |
-| `latencia_por_tamano` | +50 KB de cuerpo ≈ +600 ms | no duplicar viajes: verificar **al final**, no tras cada escritura |
-| `flow_ignora_pages` | `POST flow` ignora las `pages` del cuerpo | un POST por página |
-| `destinos_validados` | 400 *"Target page … does not exist in the flow"* / *"Referenced resource X does not exist"* | crear en orden de dependencias; en los ciclos, crear sin rutas y parchear después |
-| `ciclos_paginas` | en un ciclo de páginas, la ruta no puede validarse al crearla | ordenar las páginas para romper los ciclos: **1 PATCH extra por página del ciclo** |
-| `rutas_en_el_post` | un flow creado sin rutas y luego parcheado = 2 escrituras | si **todas** sus rutas ya son resolubles, meterlas en el `POST` del flow |
-| `end_flow` | el destino de fin de flow es `.../flows/{flow}/pages/END_FLOW` | remapear **cada** par `recurso/id` del nombre |
-| `playbook_loop` | 400 *"Playbook X caused loop in playbook routes"* | un playbook autorreferenciado no se puede crear ni actualizar por API |
-| `macros_validadas` | las macros `${PLAYBOOK:x}`/`${FLOW:x}`/`${TOOL:x}` del texto se validan | crear los playbooks en orden topologico |
-| `campos_solo_lectura` | `referencedFlows`/`referencedPlaybooks`/`inlineActions` se derivan; `defaultLanguageCode` no se puede actualizar | no mandarlos al escribir |
-| `campos_fuera_de_esquema` | un PATCH de un campo que la API pública no declara devuelve 200 y **el campo no está** | escribir contra el backend interno y **verificar releyendo** (`cx_set_console_field`) |
-| `patch_etag_obsoleto` | PATCH con el `etag` viejo → **409** *"Others may have made recent changes…"* | quitar el `etag` del cuerpo (la consola tampoco lo manda) |
-| `ruta_sin_intent_ni_condition` | 400 *"At least one of intent or condition in transition route should be specified"* | poner siempre `condition` o `intent` en la ruta |
-| `ruta_sin_destino` | 400 *"At least one of trigger fulfillment, target page, target flow, or target playbook…"* (en grupos de rutas) | dar destino al crear el grupo |
-| `subcampos_desconocidos` | escribir `advancedSettings` vacía sus subcampos desconocidos | son de solo lectura (`estado: derivado` en el catálogo) |
-| `action_schemas_derivadas` | escribir `Tool.actionSchemas` no cambia nada | solo lectura: cambiar el `openApiSpec`, no los esquemas |
-| `tipos_no_declarados_se_validan` | 400 *"Invalid value at 'agent.web_client_settings' (TYPE_STRING)"* | copiar el valor que ya tiene el recurso y cambiar solo el tipo |
-| `tool_builtin` | los tools `df-*` no se pueden crear ni borrar | saltarlos (ya existen en todo agente) |
-| `tool_openapi_vacio` | 400 *"Null or empty definition"* (tools duplicados sin `textSchema`) | recrearlos **sin** `openApiSpec` (desviación documentada) |
-| `tool_datastore_borrado` | 400 *"Failed to connect datastores … do not exist"* | recrear **sin** `dataStoreSpec` (desviación documentada) |
-| `start_flow_protegido` | no se puede borrar el `Default Start Flow` ni vaciar sus handlers | no borrarlo: PATCH de `transitionRoutes` y nada más |
-| `guard_metodo_propio` | `agents/{id}:export` se rechazaba ("no tiene permiso") | corregido en `cxp/guard.py` (se corta el sufijo `:método`) |
+| `delete_force` | `DELETE` of a referenced resource -> 400 *"Please set 'force' to true"* | `force=true` on flows/tools/webhooks/entityTypes/generators/transitionRouteGroups (**not** on playbooks nor intents) -> delete in dependency order |
+| `escrituras_serializadas` | performance stalls: POST 1->1.57 · 2->1.01 · 3->1.03 · 4->1.34 · 6->1.14 · 8->1.12 ops/s | **create in series**; **deletion** does tolerate **2 in parallel** (+20 %) |
+| `batch_404` | `/v3beta1/batch` -> **404** on the internal backend | `cx_batch` falls back to **threads**; never count on `/batch` |
+| `latencia_por_tamano` | +50 KB of body ≈ +600 ms | do not duplicate round-trips: verify **at the end**, not after each write |
+| `flow_ignora_pages` | `POST flow` ignores the `pages` in the body | one POST per page |
+| `destinos_validados` | 400 *"Target page … does not exist in the flow"* / *"Referenced resource X does not exist"* | create in dependency order; for cycles, create without routes and patch afterwards |
+| `ciclos_paginas` | in a page cycle the route cannot be validated when created | order the pages to break the cycles: **1 extra PATCH per page in the cycle** |
+| `rutas_en_el_post` | a flow created without routes and patched later = 2 writes | if **all** its routes are already resolvable, put them in the flow's `POST` |
+| `end_flow` | the end-of-flow target is `.../flows/{flow}/pages/END_FLOW` | remap **every** `resource/id` pair of the name |
+| `playbook_loop` | 400 *"Playbook X caused loop in playbook routes"* | a self-referencing playbook cannot be created or updated through the API |
+| `macros_validadas` | the `${PLAYBOOK:x}`/`${FLOW:x}`/`${TOOL:x}` macros in the text are validated | create the playbooks in topological order |
+| `campos_solo_lectura` | `referencedFlows`/`referencedPlaybooks`/`inlineActions` are derived; `defaultLanguageCode` cannot be updated | do not send them when writing |
+| `campos_fuera_de_esquema` | a PATCH of a field the public API does not declare returns 200 and **the field is not there** | write against the internal backend and **verify by reading back** (`cx_set_console_field`) |
+| `patch_etag_obsoleto` | PATCH with the old `etag` -> **409** *"Others may have made recent changes…"* | remove the `etag` from the body (the console does not send it either) |
+| `ruta_sin_intent_ni_condition` | 400 *"At least one of intent or condition in transition route should be specified"* | always put `condition` or `intent` in the route |
+| `ruta_sin_destino` | 400 *"At least one of trigger fulfillment, target page, target flow, or target playbook…"* (in route groups) | give the group a target when creating it |
+| `subcampos_desconocidos` | writing `advancedSettings` empties its unknown subfields | they are read-only (`estado: derivado` in the catalogue) |
+| `action_schemas_derivadas` | writing `Tool.actionSchemas` changes nothing | read-only: change the `openApiSpec`, not the schemas |
+| `tipos_no_declarados_se_validan` | 400 *"Invalid value at 'agent.web_client_settings' (TYPE_STRING)"* | copy the value the resource already has and only change the type |
+| `tool_builtin` | `df-*` tools cannot be created or deleted | skip them (they exist in every agent) |
+| `tool_openapi_vacio` | 400 *"Null or empty definition"* (duplicated tools without `textSchema`) | recreate them **without** `openApiSpec` (documented deviation) |
+| `tool_datastore_borrado` | 400 *"Failed to connect datastores … do not exist"* | recreate **without** `dataStoreSpec` (documented deviation) |
+| `start_flow_protegido` | the `Default Start Flow` cannot be deleted nor emptied of its handlers | do not delete it: PATCH `transitionRoutes` and nothing else |
+| `guard_metodo_propio` | `agents/{id}:export` was rejected ("no tiene permiso") | fixed in `cxp/guard.py` (the `:method` suffix is split off) |
+| `cookies_jar_incompleto` | with **only the 5 cookies** -> **401** *"Request had invalid authentication credentials"* | send the **complete** `.google.com` jar (23 cookies): `CXP_COOKIE` as-is |
+| `page_size_maximo_100` | `pageSize=200` -> **400** *"Page size should be within [0, 100]."* (on several endpoints; on `flows` 200 is fine) | ask for <=100: `cxp.gaps._listar()` retries only with 50, 20 and 5 |
+| `detect_intent_exige_language_code` | **400** *"Field 'query_input.language_code' is missing."* | the language goes in **`queryInput.languageCode`**, not in `queryInput.text.languageCode` (that form gives 400) |
+| `entorno_exige_todos_los_flows` | creating an environment -> 400 *"Flow 'X' … is not included in the environment"* (then *"Playbook 'P' … is not included"*) | publish a version of **each** flow and put them all in `versionConfigs` |
+| `test_cases_sin_delete` | `DELETE agents/{a}/testCases/{id}` -> **404** (the method does not exist) | `POST agents/{a}/testCases:batchDelete` with `{"names": [...]}` |
+| `endpoints_fuera_del_descriptor` | the UI shows data the public API **does not expose** (system entity types, who has access, which models exist…) | `cx_endpoints_consola` calls them; `cx_api` with `version=` and absolute paths reaches them |
 
 ---
 
-## Detalles técnicos (medidos)
+## Technical details (measured)
 
-### Red
+### Network
 
-| riesgo | mitigación | dónde |
+| risk | mitigation | where |
 |---|---|---|
-| Handshake TLS en cada petición (0,66 s) | **una sola `Session` para todo el servidor** → keep-alive por hilo | `server.py` (`_HTTP`/`_API`/`_MIRROR`) |
-| IP negra entre las de `/etc/hosts` | **timeout de connect de 8 s** (no 45) → cae rápido a la siguiente IP | `cxp/httpclient.py` |
-| Payload enorme (`list_playbooks` puede ser cientos de KB) | **caché de catálogos** (id→displayName) con TTL 120 s y autorrenovación | `cxp/console_api.py` |
-| Error de red transitorio | 1 reintento, **solo de red** (un HTTP 4xx/5xx no se reintenta) | `cxp/httpclient.py` |
-| Timeout de lectura | 45 s (300 s para `detectIntent`/`train`/`validate`) | `cxp/config.py` |
-| MTU / offloads / DNS del sistema | **no se tocan**: el MCP no modifica el estado del sistema | — |
+| TLS handshake on every request (0.66 s) | **a single `Session` for the whole server** -> keep-alive per thread | `server.py` (`_HTTP`/`_API`/`_MIRROR`) |
+| Black-holed IP among the ones in `/etc/hosts` | **8 s connect timeout** (not 45) -> it falls through to the next IP quickly | `cxp/httpclient.py` |
+| Huge payload (`list_playbooks` can be hundreds of KB) | **catalogue cache** (id->displayName) with a 120 s TTL and self-renewal | `cxp/console_api.py` |
+| Transient network error | 1 retry, **network only** (an HTTP 4xx/5xx is not retried) | `cxp/httpclient.py` |
+| Read timeout | 45 s (300 s for `detectIntent`/`train`/`validate`) | `cxp/config.py` |
+| MTU / offloads / system DNS | **not touched**: the MCP does not modify system state | — |
+| Location != `global` | **regional host** (`{location}-dialogflow.clients6.google.com`) + `referer` with that host | `cxp/console_api.py` (`host_de_path`) |
 
-Medición del antes/después de la llamada típica (`cx_get_flow`):
+Measured before/after for the typical call (`cx_get_flow`):
 
-| | por llamada |
+| | per call |
 |---|---|
-| antes (Session nueva por llamada + sin caché) | **2,663 s** |
-| después (keep-alive + caché de catálogos) | **0,402 s** |
+| before (new Session per call + no cache) | **2.663 s** |
+| after (keep-alive + catalogue cache) | **0.402 s** |
 
-### El backend interno sirve las tres versiones
+### The internal backend serves all four versions
 
-`dialogflow.clients6.google.com` responde en `/v3alpha1`, `/v3beta1` y `/v3`, y
-en las tres entrega su **discovery doc** (`$discovery/rest?version=…`). Por eso el
-espejo puede ser "de v3beta1" sin escribir los 162 métodos a mano: el mapa sale del
-descriptor.
+`dialogflow.clients6.google.com` answers on `/v3alpha1`, `/v3beta1`, `/v3` and
+`/v2beta1`, and serves its **discovery doc** on each one (`$discovery/rest?version=…`).
+That is why the mirror can be "v3beta1" without hand-writing the 162 methods: the map
+comes from the descriptor.
 
-**Autenticación de primera parte.** Cabeceras mínimas que el backend acepta (verificadas
-por captura, no de memoria):
+Methods each version declares (counted on the real descriptor):
+
+| version | methods | relation |
+|---|---|---|
+| `v3beta1` | **162** | **superset**: none of `v3`'s nor `v3alpha1`'s is missing from it |
+| `v3` | 158 | 4 of them are missing from `v3beta1` |
+| `v3alpha1` | 8 | all 8 are also in `v3beta1` |
+| `v2beta1` | — | no descriptor; only `agent/visibility` and `conversationProfiles` |
+
+> **The public descriptor and the internal backend's one are THE SAME DOCUMENT**
+> (measured: 669,652 bytes each and the same canonical md5
+> `29adf74f6e0f0e4dede7fefeb5de774e`; only the order of the JSON keys changes). That is
+> why looking for "which method is missing" by comparing descriptors **finds nothing**:
+> what is missing are endpoints the console uses that are in **neither** of them (see
+> `cx_endpoints_consola`).
+
+### Every location has its HOST (and the `referer` goes with it)
+
+Measured (2026-11-15): the console calls **17 regional hosts**
+(`{location}-dialogflow.clients6.google.com`) to list the agents of every location, and
+the global host **does not** serve the others:
+
+```
+GET https://dialogflow.clients6.google.com/v3beta1/projects/p/locations/us-central1/agents
+  -> 400 "Please refer to .../region#avail to find the correct endpoint"
+```
+
+The headers **do not change with the host**, except the `referer`:
+
+| header | value | why |
+|---|---|---|
+| `authorization` (SAPISIDHASH) | signed over the **console origin** | the same for every host |
+| `x-origin`, `x-referer` | the **console origin** | otherwise -> 401 *"invalid authentication credentials"* |
+| `referer` | `{HOST}/static/proxy.html?usegapi=1` | otherwise -> 400 *"Origin doesn't match Host for XD3"* |
+
+The MCP applies it on its own: the `referer` is derived from the host of the URL. To
+talk to another location, `cx_api(location="us-central1")` (or
+`cx_list_agents(todas_las_locations=True)`, which is what the console does).
+
+**The console speaks `v3alpha1`**, not v3beta1. That is why `cx_api` accepts `version=`
+and version-prefixed paths: there are endpoints (and data) that only come out in
+`v3alpha1`/`v2beta1`.
+
+**First-party authentication.** The minimum headers the backend accepts (verified by
+capture, not from memory):
 
 ```
 authorization: SAPISIDHASH {ts}_{h} SAPISID1PHASH {ts}_{h} SAPISID3PHASH {ts}_{h}
-cookie:        las 5 cookies de sesion de `.google.com`
+cookie:        the COMPLETE jar of .google.com session cookies (not just 5)
 x-origin:      <CXP_CONSOLE_ORIGIN>
 x-referer:     <CXP_CONSOLE_ORIGIN>
 x-goog-authuser: 0
 referer:       https://dialogflow.clients6.google.com/static/proxy.html?usegapi=1
 ```
 
-- `h = sha1(f"{ts} {valor_de_SAPISID} {console_origin}")`, `ts` = epoch actual. Los tres
-  hash son iguales (la consola usa `SAPISID` para los tres). **Se re-firma en cada
-  llamada** (delta medido: 0 s).
-- **No mandar cabecera `Origin`**: el servidor exige que `Origin` y `Referer` coincidan
-  → HTTP 400 *"Origin and Referer header don't match"*.
-- Con `Bearer` (token de servicio) el backend responde **404 "Method not found"**: exige
-  primera parte.
-- HTTP/1.1 vale: no hace falta h2.
-- Solo viajan las **5 cookies** del dominio `.google.com`: una cookie de otro dominio
-  invalida la credencial (401).
+- `h = sha1(f"{ts} {value_of_SAPISID} {console_origin}")`, `ts` = current epoch. The
+  three hashes are equal (the console uses `SAPISID` for all three). **It is re-signed
+  on every call** (measured delta: 0 s).
+- **Do not send an `Origin` header**: the server requires `Origin` and `Referer` to
+  match -> HTTP 400 *"Origin and Referer header don't match"*.
+- With `Bearer` (service account token) the backend answers **404 "Method not found"**:
+  it requires first-party.
+- HTTP/1.1 is fine: h2 is not needed.
+- Only cookies from the `.google.com` domain travel: a cookie from **another** domain
+  invalidates the credential (401).
+- **The complete jar, not just the 5**: measured, with 5 cookies -> 401 and with the 23
+  from `.google.com` -> 200, with the same binary and the same `.env`. Session cookies
+  are revalidated; if you only send 5 of 23 you get locked out when the session renews.
 
-**Escritura.** `PATCH .../flows/{FLOW}?updateMask=transitionRoutes` con el **array
-completo** de `transitionRoutes` en el body (igual que la consola). El `etag` se omite a
-propósito: el `GET` interno no lo devuelve y un etag viejo hace fallar el `PATCH`.
+**Writing.** `PATCH .../flows/{FLOW}?updateMask=transitionRoutes` with the **complete
+array** of `transitionRoutes` in the body (same as the console). The `etag` is
+deliberately omitted: the internal `GET` does not return it and a stale etag makes the
+`PATCH` fail.
 
-**Trampas:**
+**Traps:**
 
-| síntoma | causa |
+| symptom | cause |
 |---|---|
-| HTTP 404 "Method not found" | se usó `Bearer` en vez de primera parte |
-| HTTP 401 "invalid authentication credentials" | faltan cookies, o se mandaron cookies de otros dominios |
-| HTTP 400 "Origin and Referer don't match" | se mandó la cabecera `Origin` |
-| El cambio no aparece | el `PATCH` no incluye `targetPlaybook` (proto público) o el flow no es el que creías |
-| `no tiene permiso` | el agente no está en `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` |
-| El subproceso MCP no ve tus variables | el SDK de MCP no hereda el entorno: pásalo en `env` |
+| HTTP 404 "Method not found" | `Bearer` was used instead of first-party |
+| HTTP 401 "invalid authentication credentials" | cookies are missing, cookies from other domains were sent, **or only the 5 were sent instead of the complete jar** |
+| HTTP 400 "Origin and Referer don't match" | the `Origin` header was sent |
+| The change does not appear | the `PATCH` does not include `targetPlaybook` (public proto) or the flow is not the one you thought |
+| `no tiene permiso` | the agent is not in `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` |
+| The MCP subprocess does not see your variables | the MCP SDK does not inherit the environment: pass them in `env` |
 
 ---
 
-## Desarrollo
+## Conversation history (via the API)
+
+The history of what the user said and the agent answered **is in the API**, in the
+`agents.conversations` resource:
+
+```
+GET https://dialogflow.clients6.google.com/v3beta1/projects/{p}/locations/{l}/agents/{a}/conversations/{id}
+```
+
+Measured (2026-11-16):
+
+* The history ids have the shape `<prefix>-<epoch_ms>-<hash>` (e.g.
+  `176789778-1794839495291-3b210e2a646addc6`): they are **`conversations`**, not CX
+  UUIDs. `agents.sessions` is only the live state of a session (parameters, entity
+  types) and **does not** keep history.
+* The `get` brings `interactions[]` with `request` (`queryInput` + `queryParams`) and
+  `response` (`queryResult` with the agent's text, `match`, `generativeInfo`,
+  `traceBlocks` and `stepMetrics` with the latencies).
+* The **public** `get` (`dialogflow.googleapis.com`) returns the conversation **without
+  `interactions`** (metadata only): for the full log you have to go to the console's
+  backend.
+* `conversations.list` paginates and returns the ids + metrics; the individual `get`
+  returns the detail.
+
+Extraction script (raw JSON + readable Markdown + index):
+
+```bash
+.venv/bin/python probes/exp_logs_conversaciones.py \
+    --agente <agent-uuid> --proyecto <project-id> \
+    --session <id> --session <id> ...
+```
+
+### Publishing the logs on a public channel (temporary)
+
+Measured 2026-11-16: there are **three** paths and **only one** is really public.
+
+| Path | Really public? | Note |
+|---|---|---|
+| `tailscale funnel` | **NO** (measured: 520/522 from outside) | the Tailscale proxy answers inside the tailnet, but **not** from the internet: the `ts.net` subdomain does not resolve to a public edge without the Tailscale client |
+| GCS / `gcloud storage sign-url` | yes | but it **uses resources of the user's GCP project** |
+| **Cloudflare quick tunnel** | **YES** (measured) | `cloudflared tunnel --url` -> a public `trycloudflare.com` subdomain, **without an account** and without touching the user's resources |
+
+Setup (static server + tunnel, both as systemd services):
+
+```bash
+# 1) server: probes/sirve_logs.py -> 127.0.0.1:8099, no directory listing, no
+#    dotfiles, no POST, and WITH Range support (206).
+# 2) tunnel: probes/tunnel_publico.sh -> cloudflared --url http://127.0.0.1:8099
+```
+
+* `sirve-logs-conversaciones.service` — the static server.
+* `tunnel-logs-publico.service` — the tunnel (starts on its own, `Restart=always`).
+* The live URL is stored in `logs-conversaciones/.url-publica` and read with
+  `probes/url_publica.sh`.
+
+**TRAP (measured):** the quick tunnel generates a **RANDOM subdomain on every start**
+=> when the service restarts the URL **changes** and has to be shared again. It
+propagates in ~10 s. For a fixed URL you need a Cloudflare *named tunnel* with an
+account and a domain.
+
+**TRAP (measured):** third-party HTTP relays (allorigins, codetabs) fail with
+**522/520** against `trycloudflare.com` because Cloudflare does not route
+Cloudflare->Cloudflare. To verify from outside you have to use a **non-Cloudflare**
+reader (e.g. `r.jina.ai`).
+
+---
+
+## Development
 
 ```bash
 pip install -e ".[dev]"
 
-pytest                  # tests unitarios (sin red)
-python smoke_test.py    # prueba de punta a punta por el protocolo MCP
+pytest                  # unit tests (no network)
+python smoke_test.py    # end-to-end test over the MCP protocol
 ```
 
-* **`tests/`** — tests unitarios de la capa de huecos y de la escritura genérica
-  (no necesitan red ni credenciales).
-* **`smoke_test.py`** — llama a las herramientas de verdad por el protocolo MCP.
-  Es **genérico**: no hay ningún agente, flow ni playbook cableado; descubre
-  todo en el agente del `.env` y escribe solo sobre recursos **temporales**
-  (flow, página, entity type y grupo de rutas) que borra al final.
-* **`probes/`** — las sondas que produjeron las mediciones: el detector de
-  huecos (`probe_schema_gaps.py`), la matriz de escritura (`probe_console_only_writable3.py`)
-  y los experimentos de captura de tráfico de la consola. No hacen falta para
-  operar. Los ids de agente que usan salen del entorno
-  (`CXP_PROBE_AGENTS`, `CXP_PROBE_TARGETS`), nunca cableados.
+* **`tests/`** — unit tests for the gap layer and for the generic writing (no network
+  nor credentials needed).
+* **`smoke_test.py`** — calls the real tools over the MCP protocol. It is **generic**:
+  there is no agent, flow nor playbook hardcoded; it discovers everything in the
+  agent of the `.env` and only writes on **temporary** resources (flow, page, entity type
+  and route group) that it deletes at the end.
+* **`probes/`** — the probes that produced the measurements: the gap detector
+  (`probe_schema_gaps.py`), the writing matrix (`probe_console_only_writable3.py`) and
+  the console traffic capture experiments. They are not needed to operate the MCP. The
+  agent ids they use come from the environment (`CXP_PROBE_AGENTS`,
+  `CXP_PROBE_TARGETS`), never hardcoded.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the golden rule: **if you claim it, measure
+it.**
+
+The last full verification run (unit tests, smoke test, cleanup, the internal proto
+catalogue and the live measurement of all 38 fields) is in
+[docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ---
 
-## Publicar
+## Security
 
-El repositorio se llama **`dialogflow-cx-mcp`**. Para publicarlo (lo hace
-quien tenga la cuenta, porque es una acción visible para cualquiera):
+* **Your browser session cookies are credentials.** Treat them like a password: never
+  commit them, never share them, never paste them in an issue.
+* `.env`, `.session-state.json`, browser profiles and the discovery cache are
+  gitignored. Double-check before pushing.
+* The MCP enforces an **allowlist** of agents it may touch: anything not in
+  `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` is not accessible at all.
+* Write access should only be granted to **your own copy** of an agent.
+* If you think you have leaked a cookie, **sign out of Google** and rotate your
+  session.
 
-```bash
-gh repo create dialogflow-cx-mcp --public --source=. --push \
-   --description "MCP: espejo de la API v3beta1 de Dialogflow CX + los campos que la API publica no puede expresar"
-```
+Report a vulnerability privately: see [SECURITY.md](SECURITY.md).
 
 ---
 
-## Aviso legal
+## Legal notice
 
-Este proyecto **no está afiliado a Google**. Habla con un backend interno de
-Google que no forma parte de la API pública y usa la autenticación de primera
-parte de tu propia cuenta.
+This project **is not affiliated with Google**. It talks to an internal Google backend
+that is not part of the public API and uses your own account's first-party
+authentication.
 
-* Úsalo solo con cuentas y proyectos tuyos, y solo para lo que la consola ya
-  te permite hacer a mano.
-* Las cookies de sesión de tu navegador son **credenciales**: trátalas como
-  una contraseña (no las subas a un repositorio, no las compartas).
-* Los datos que escribe este MCP son los mismos que escribes en la consola:
-  el MCP no inventa capacidades, solo usa un camino que la API pública no
-  expone.
-* Las APIs de Google y sus políticas pueden cambiar en cualquier momento.
+* Use it only with your own accounts and projects, and only for what the console
+  already lets you do by hand.
+* Your browser session cookies are **credentials**: treat them like a password (do not
+  push them to a repository, do not share them).
+* The data this MCP writes is the same data you write in the console: the MCP does not
+  invent capabilities, it only uses a path the public API does not expose.
+* Google's APIs and policies may change at any time.
 
-Licencia: [Apache-2.0](LICENSE).
+---
+
+## License
+
+[Apache-2.0](LICENSE) © Cristofer Fuentes.
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,13 +1,12 @@
-"""Acceso a la API de Dialogflow CX por los dos backends.
+"""Access to the Dialogflow CX API through both backends.
 
-* `public`  -> global-dialogflow.googleapis.com  (proto PUBLICO: TransitionRoute
-                NO tiene targetPlaybook; el campo se descarta en silencio).
-* `console` -> dialogflow.clients6.google.com    (proto INTERNO de la consola:
-                TransitionRoute SI tiene targetPlaybook).
+* `public`  -> global-dialogflow.googleapis.com  (proto PUBLIC: TransitionRoute
+                does NOT have targetPlaybook; the field is dropped silently).
+* `console` -> dialogflow.clients6.google.com    (console proto INTERNAL:
+                TransitionRoute DOES have targetPlaybook).
 
-Autenticacion: bearer token de gcloud (ADC) o primera parte (SAPISIDHASH) de la
-sesion de la consola.
-"""
+Authentication: gcloud bearer token (ADC) or first party (SAPISIDHASH) from the
+console session."""
 from __future__ import annotations
 
 from .auth import gcloud_access_token
@@ -31,7 +30,7 @@ class CxApi:
         return bool(self._token)
 
     def use_first_party(self, headers: dict[str, str]) -> None:
-        """Autenticacion de primera parte (la de la consola)."""
+        """First-party authentication (the console's)."""
         self._token = None
         self._extra_headers = dict(headers)
 
@@ -50,7 +49,7 @@ class CxApi:
     def _base(self, agent_id: str, backend: str) -> str:
         return self.cfg.agent_base(agent_id, backend)
 
-    # ------------------------------------------------------------- lecturas
+    # ------------------------------------------------------------- reads
     def list_agents(self, backend: str = "public") -> list[dict]:
         url = f"{self._base('x', backend)}".replace("/agents/x", "/agents")
         data = self.http.json("GET", f"{url}?pageSize=200", self._headers())
@@ -75,7 +74,7 @@ class CxApi:
         data = self.http.json("GET", url, self._headers())
         return data.get("playbooks", [])  # type: ignore[union-attr]
 
-    # ------------------------------------------------------------- escritura
+    # ------------------------------------------------------------- write
     def update_page(
         self,
         agent_id: str,
@@ -97,7 +96,7 @@ class CxApi:
             "PATCH", url, self._headers(), body, timeout=timeout
         )
 
-    # ------------------------------------------------------------- resolucion
+    # ------------------------------------------------------------- resolution
     def resolve_flow(self, agent_id: str, flow: str, backend: str = "public") -> str:
         flows = self.list_flows(agent_id, backend)
         for f in flows:

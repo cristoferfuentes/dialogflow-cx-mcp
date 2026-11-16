@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Captura el payload INTERNO del flow (con targetPlaybook) usando la sesion
-CDP cruda (los eventos `response` de Playwright no se disparan sobre un
-contexto conectado por CDP).
+"""Captures the INTERNAL payload of the flow (with targetPlaybook) using the raw
+CDP session (the Playwright `response` events do not fire on a
+context connected via CDP).
 
-Uso: .venv/bin/python capture_flow_payload.py --agent original [--out /tmp/x.json]
+Usage: .venv/bin/python capture_flow_payload.py --agent original [--out /tmp/x.json]
 """
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 FRAME_URL = (
@@ -62,11 +62,11 @@ def main() -> int:
             res = cdp.send("Network.getResponseBody", {"requestId": rid})
             body = res.get("body", "")
         except Exception as exc:
-            print(f"== no se pudo leer el cuerpo de {u[:80]}: {exc}", flush=True)
+            print(f"== could not read the body of {u[:80]}: {exc}", flush=True)
             return
         if "transitionRoutes" in body or "targetPlaybook" in body:
             bodies.append((u, body))
-            print(f"== capturada {u[:110]} ({len(body)} B)", flush=True)
+            print(f"== captured {u[:110]} ({len(body)} B)", flush=True)
 
     cdp.on("Network.responseReceived", on_received)
     cdp.on("Network.loadingFinished", on_finished)
@@ -74,29 +74,29 @@ def main() -> int:
     page.goto(url, wait_until="domcontentloaded", timeout=90_000)
     time.sleep(14)
 
-    print(f"== payloads con rutas: {len(bodies)}", flush=True)
+    print(f"== payloads with routes: {len(bodies)}", flush=True)
     for u, body in bodies:
         try:
             data = json.loads(body)
         except Exception:
-            print(f"== {u[:100]}: no es JSON", flush=True)
+            print(f"== {u[:100]}: not JSON", flush=True)
             continue
         print(f"\n== {u[:110]}", flush=True)
         for p in (data.get("pages") or []):
             tr = p.get("transitionRoutes") or []
             if not tr:
                 continue
-            print(f"  PAGINA {p.get('displayName')}  ({len(tr)} rutas)", flush=True)
+            print(f"  PAGE {p.get('displayName')}  ({len(tr)} routes)", flush=True)
             for r in tr:
                 print(f"    - {r.get('name','').split('/')[-1]}  {r.get('condition')}", flush=True)
-                print(f"        claves: {sorted(r.keys())}", flush=True)
+                print(f"        keys: {sorted(r.keys())}", flush=True)
                 print(f"        targetPlaybook: {r.get('targetPlaybook')}", flush=True)
         for r in (data.get("transitionRoutes") or []):
-            print(f"  [flow] {r.get('condition')}  claves={sorted(r.keys())}  pb={r.get('targetPlaybook')}", flush=True)
+            print(f"  [flow] {r.get('condition')}  keys={sorted(r.keys())}  pb={r.get('targetPlaybook')}", flush=True)
 
     if args.out and bodies:
         Path(args.out).write_text(bodies[-1][1], encoding="utf-8")
-        print(f"\n== escrito {args.out}", flush=True)
+        print(f"\n== written {args.out}", flush=True)
     return 0
 
 

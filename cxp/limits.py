@@ -1,22 +1,21 @@
-"""LIMITES MEDIDOS de la API interna de Dialogflow CX (2026-11-08).
+"""LIMITS MEASURED of the internal API of Dialogflow CX (2026-11-08).
 
-Este modulo es la **memoria del MCP**: todo lo que se midio a la fuerza (el
-error exacto que devuelve la API, por que lo devuelve y como esquivarlo) vive
-aqui como DATO, para que el proximo agente que use el MCP no vuelva a
-trotpezar con lo mismo ni tenga que re-descubrirlo a base de HTTP 400.
+This module is the **memory of the MCP**: everything that was measured the hard way (the
+exact error the API returns, why it returns it and how to work around it) lives
+here as DATA, so that the next agent using the MCP does not stumble
+on the same thing again or have to re-descubrirlo through HTTP 400s.
 
-Se consulta con la herramienta `cx_limites_api` y se anexa automaticamente a
-los errores del pipeline de clonado (`causa` + `workaround`).
+It is queried with the `cx_limites_api` tool and is automatically appended to
+the errors of the cloning pipeline (`causa` + `workaround`).
 
-Los limites del descriptor oficial (`discovery`) NO cubren esto: el descriptor
-publico dice que `referencedPlaybooks` es de solo lectura y no dice nada de
-`force`, del `/batch`, de los bucles de playbooks ni de la latencia.
-"""
+The limits of the official discovery doc (`discovery`) do NOT cover this: the public
+discovery doc says that `referencedPlaybooks` is read-only and says nothing about
+`force`, the `/batch`, playbook loops or latency."""
 from __future__ import annotations
 
 from typing import Any
 
-# --- Constantes de rendimiento (medidas en este host, 2026-11-08) ------------
+# --- Performance constants (measured on this host, 2026-11-08) ------------
 CONSTANTES: dict[str, Any] = {
     "ms_get": 450,
     "ms_post": 560,
@@ -26,7 +25,7 @@ CONSTANTES: dict[str, Any] = {
     "escrituras_paralelas": False,
     "borrado_paralelo_optimo": 2,
     "curva_concurrencia_ops_por_s": {
-        # mediana de 3 repeticiones con calentamiento (probe_write_concurrency2)
+        # median of 3 repetitions with warm-up (probe_write_concurrency2)
         "POST": {"1": 1.57, "2": 1.01, "3": 1.03, "4": 1.34, "6": 1.14, "8": 1.12},
         "DELETE": {"1": 1.75, "2": 2.10, "3": 1.50, "4": 1.34, "6": 1.21, "8": 1.14},
     },
@@ -43,7 +42,7 @@ CONSTANTES: dict[str, Any] = {
     ),
 }
 
-# --- Limites de la API (sintoma -> causa -> como esquivarlo) ----------------
+# --- API limits (symptom -> cause -> how to work around it) ----------------
 LIMITES: list[dict[str, Any]] = [
     {
         "id": "delete_force",
@@ -290,8 +289,8 @@ LIMITES: list[dict[str, Any]] = [
         "tags": ["guardas", "permisos"],
     },
     # ------------------------------------------------------------------
-    # Los limites de ESCRIBIR CAMPOS FUERA DEL ESQUEMA (medidos con la
-    # sonda `probes/probe_console_only_writable3.py`).
+    # The limits of WRITE FIELDS OUTSIDE OF SCHEMA (measured with the
+    # probe `probes/probe_console_only_writable3.py`).
     # ------------------------------------------------------------------
     {
         "id": "campos_fuera_de_esquema",
@@ -386,11 +385,110 @@ LIMITES: list[dict[str, Any]] = [
                       "devuelve) y cambiar solo el tipo.",
         "tags": ["tipos", "campos", "validacion"],
     },
+    {
+        "id": "cookies_jar_incompleto",
+        "titulo": "Las 5 cookies NO bastan: el backend pide el jar completo",
+        "sintoma": "HTTP 401 'Request had invalid authentication credentials. "
+                   "Expected OAuth 2 access token, login cookie or other valid "
+                   "authentication credential.'",
+        "causa": "Las cookies de sesion de Google (`__Secure-*PSIDTS`, "
+                 "`__Host-GAPS`, `SIDCC`, `OSID`...) tambien se revalidan. "
+                 "MEDIDO (2026-11-13) con el mismo binario y el mismo "
+                 "`:env`: con solo `SAPISID, SID, HSID, SSID, APISID` -> 401; "
+                 "con las 23 cookies de `.google.com` -> 200.",
+        "workaround": "`CXP_COOKIE` debe llevar el jar COMPLETO de `.google.com` "
+                      "(copiado del navegador). Las 5 siguen siendo el minimo "
+                      "que se comprueba (`missing_cookies()`), pero no el "
+                      "conjunto que se manda. `probes/renueva_cookies.py` las "
+                      "renueva desde el Chrome real.",
+        "tags": ["auth", "cookies", "401"],
+    },
+    {
+        "id": "page_size_maximo_100",
+        "titulo": "El backend interno acota `pageSize` a 100 (el descriptor no)",
+        "sintoma": "HTTP 400 'Page size should be within [0, 100].' al pedir "
+                   "`pageSize=200`.",
+        "causa": "El descriptor publico declara `pageSize` sin maximo, pero el "
+                 "backend de la consola aplica un tope. MEDIDO: `agents/{a}/"
+                 "environments` con `pageSize=200` -> 400; con 100, 50, 20 o 5 "
+                 "-> 200. Ojo: `agents/{a}/flows` con 200 SI funciona: el tope "
+                 "es por endpoint, no global.",
+        "workaround": "Pedir 100 (o menos). `cxp.gaps._listar()` reintenta "
+                      "sola con 50, 20 y 5 si el servidor lo rechaza.",
+        "tags": ["listado", "pageSize", "400"],
+    },
+    {
+        "id": "detect_intent_exige_language_code",
+        "titulo": "`detectIntent` exige `queryInput.languageCode`",
+        "sintoma": "HTTP 400 \"Field 'query_input.language_code' is missing.\"",
+        "causa": "El idioma va en `queryInput.languageCode`, NO dentro de "
+                 "`queryInput.text.languageCode` (esa forma se descarta y el "
+                 "servidor responde 400). MEDIDO (2026-11-13) con las tres "
+                 "formas: `queryInput.languageCode` -> 200; "
+                 "`queryInput.text.languageCode` -> 400; `languageCode` en la "
+                 "raiz -> 400.",
+        "workaround": "Cuerpo: `{\"queryInput\": {\"text\": {\"text\": ...}, "
+                      "\"languageCode\": \"es\"}}`. La ruta es "
+                      "`agents/{a}/sessions/{sessionId}:detectIntent` "
+                      "(NO `sessions:detectIntent`: esa da 404).",
+        "tags": ["detectIntent", "sesion", "400"],
+    },
+    {
+        "id": "entorno_exige_todos_los_flows",
+        "titulo": "Crear un entorno exige versionConfigs con TODOS los flows",
+        "sintoma": "HTTP 400 \"Flow 'X' is referenced in version 'Y' of flow "
+                   "'Z', but not included in the environment.\" y, en la "
+                   "siguiente vuelta, \"Playbook 'P' is referenced in version "
+                   "'Y' of flow 'Z', but not included in the environment.\"",
+        "causa": "La version publicada arrastra referencias a otros flows **y "
+                 "a playbooks**, y el entorno tiene que incluirlas todas en "
+                 "`versionConfigs`. El proto publico no declara ningun campo "
+                 "para meter un playbook en el `versionConfig`: el hueco se "
+                 "nota justo al crear el entorno.",
+        "workaround": "Publicar una version de CADA flow del agente y meterlas "
+                      "todas en `versionConfigs`. Si ademas falla por un "
+                      "playbook, hay que publicar las versiones de playbook "
+                      "tambien.",
+        "tags": ["entornos", "versiones", "400"],
+    },
+    {
+        "id": "test_cases_sin_delete",
+        "titulo": "`testCases` no tiene DELETE: se borran en lote",
+        "sintoma": "DELETE a `agents/{a}/testCases/{id}` -> **404** (no es un "
+                   "problema de permisos: el metodo no existe).",
+        "causa": "El descriptor solo declara `batchDelete` "
+                 "(`POST agents/{a}/testCases:batchDelete`) y `patch`. El "
+                 "borrado de un caso suelto no existe en la API.",
+        "workaround": "`POST agents/{a}/testCases:batchDelete` con "
+                      "`{\"names\": [\"projects/.../testCases/{id}\"]}` (medido: "
+                      "borra los 6 de golpe y la lista queda vacia).",
+        "tags": ["testCases", "borrado", "404"],
+    },
+    {
+        "id": "endpoints_fuera_del_descriptor",
+        "titulo": "La consola llama a endpoints que NO estan en el descriptor",
+        "sintoma": "La UI muestra datos (tipos de entidad del sistema, usuarios "
+                   "con acceso, modelos disponibles, proyectos recientes) que "
+                   "la API publica no expone: no hay metodo que pedir.",
+        "causa": "El discovery doc publico y el del backend interno son "
+                 "EL MISMO DOCUMENTO (medido: 669 652 bytes cada uno, mismo md5 "
+                 "canonico 29adf74f..., los mismos 162 "
+                 "metodos en v3beta1): lo que falta no es un metodo, son "
+                 "endpoints que la consola usa y que no estan en NINGUN "
+                 "descriptor (`systemEntityTypes:list`, `currentUsers`, "
+                 "`:listAvailableModels`, `:getSupportedLanguages`, "
+                 "`users/me/userSettings/recentProjects`, `agent/visibility`, "
+                 "`conversationProfiles`, `locationSettings`).",
+        "workaround": "`cx_api` con `version=` y rutas absolutas los alcanza "
+                      "todos: ver el catalogo en `cxp/console_endpoints.py` "
+                      "(`HUECOS_METODO`) y la herramienta `cx_endpoints_consola`.",
+        "tags": ["metodos", "descriptor", "consola"],
+    },
 ]
 
 
 def buscar(filtro: str = "") -> list[dict[str, Any]]:
-    """Limites filtrados por texto (id, titulo, sintoma, causa, workaround)."""
+    """Limits filtered by text (id, title, symptom, cause, workaround)."""
     if not filtro:
         return LIMITES
     f = filtro.lower()
@@ -405,11 +503,10 @@ def buscar(filtro: str = "") -> list[dict[str, Any]]:
 
 
 def causa_de(mensaje: str) -> dict[str, Any] | None:
-    """Deduce el limite conocido que explica un error de la API.
+    """Deduces the known limit that explains an error from the API.
 
-    Se usa para anotar automaticamente los errores del pipeline: el agente que
-    lee el informe ve, junto al HTTP 400, la causa y el rodeo.
-    """
+    Used to automatically annotate pipeline errors: the agent that
+    reads the report sees, next to the HTTP 400, the cause and the workaround."""
     m = (mensaje or "").lower()
     if not m:
         return None

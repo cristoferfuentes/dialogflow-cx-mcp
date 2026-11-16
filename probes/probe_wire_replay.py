@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Experimento concluyente: repetir con curl EXACTAMENTE las cabeceras de
-cable que Chrome puso en una peticion que ya funciono (200).
+"""Conclusive experiment: repeat with curl EXACTLY the wire headers
+that Chrome put on a request that already worked (200).
 
-Uso: .venv/bin/python probe_wire_replay.py
+Usage: .venv/bin/python probe_wire_replay.py
 """
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agente, targets_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
 ORIG = agente("por_defecto")
@@ -64,17 +64,17 @@ def main() -> int:
             "X-Requested-With": "XMLHttpRequest"}},
     )
     time.sleep(3)
-    print(f"== fetch del navegador (via proxy.html): HTTP {status}")
+    print(f"== browser fetch (via proxy.html): HTTP {status}")
 
     if not wire:
-        print("== no se capturaron cabeceras de cable")
+        print("== no wire headers were captured")
         return 1
     w = wire[-1]
-    print("\n== cabeceras de cable de esa peticion:")
+    print("\n== wire headers of that request:")
     for k, v in sorted(w.items()):
         print(f"   {k}: {str(v)[:130]}")
 
-    # Se reproducen tal cual (solo se recalcula el Authorization con ts fresco).
+    # They are replayed as they are (only the Authorization is recomputed with a fresh ts).
     hdrs = {k: v for k, v in w.items() if not k.startswith(":") and k != "cookie"}
     hdrs["cookie"] = w.get("cookie", "")
     Path("/tmp/wire_exact.txt").write_text(
@@ -85,7 +85,7 @@ def main() -> int:
             ["curl", "-sS", "-o", "/tmp/wire_out.json", "-w", "%{http_code}",
              *extra, "-H", "@/tmp/wire_exact.txt", url],
             capture_output=True, text=True, timeout=90)
-        print(f"\n== replay EXACTO con curl {label}: HTTP {r.stdout.strip()} {r.stderr.strip()[:120]}")
+        print(f"\n== EXACT replay with curl {label}: HTTP {r.stdout.strip()} {r.stderr.strip()[:120]}")
         if r.stdout.strip() == "200":
             d = json.loads(Path("/tmp/wire_out.json").read_text(encoding="utf-8"))
             print("   etag:", d.get("etag"))

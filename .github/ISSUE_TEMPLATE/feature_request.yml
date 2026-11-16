@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a new tool, a new measured gap, or an improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This MCP documents what the Dialogflow CX console can do and the public API
+        cannot. Most useful requests come with a **measurement**: an exact error, an
+        exact payload, or an exact response.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that the MCP cannot do today?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is it?
+      options:
+        - A new tool
+        - A new gap (a field the public API cannot express)
+        - A new limit (an undocumented behaviour of the API)
+        - A new console endpoint (not in any descriptor)
+        - Documentation
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: |
+        The exact request and response you observed, the probe you used, or the
+        console's behaviour you saw. Redact credentials and ids.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you tried

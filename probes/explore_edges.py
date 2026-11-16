@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""Explora el panel 'Edge Information' del grafo: de ahi sale el mapa
-ruta -> playbook (cada arista es una transition route de la pagina).
+"""Explores the 'Edge Information' panel of the graph: that is where the
+route -> playbook map comes from (each edge is a transition route of the page).
 
-Uso: .venv/bin/python explore_edges.py [--agent original|clon]
+Usage: .venv/bin/python explore_edges.py [--agent original|clon]
 """
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 FRAME_URL = (
@@ -53,18 +52,18 @@ def main() -> int:
     time.sleep(10)
 
     nodes = page.evaluate(JS_NODES)
-    print(f"== nodos del grafo: {len(nodes)}")
+    print(f"== graph nodes: {len(nodes)}")
     for n in nodes:
         print(f"   {n['t']!r} @({n['x']},{n['y']}) cls={n['cls']}")
 
-    # Pulsar el nodo de la pagina (el que tiene 'transicion_canal')
+    # Click the page node (the one with 'transicion_canal')
     objetivo = next((n for n in nodes if "transicion_canal" in n["t"]), None)
     if objetivo:
-        print(f"\n== pulsando el nodo {objetivo['t']!r}", flush=True)
+        print(f"\n== clicking the node {objetivo['t']!r}", flush=True)
         page.mouse.click(objetivo["x"], objetivo["y"])
         time.sleep(3)
 
-    # Leer el panel "Edge Information"
+    # Read the "Edge Information" panel
     try:
         txt = page.evaluate("""() => {
             const els=[...document.querySelectorAll('*')].filter(e=>e.children.length===0
@@ -74,11 +73,11 @@ def main() -> int:
         }""")
         print("\n== Edge Information:\n", txt)
     except Exception as exc:
-        print(f"edge info fallo: {exc}")
+        print(f"edge info failed: {exc}")
 
     try:
         page.screenshot(path=args.shot, full_page=False)
-        print(f"\n== captura {args.shot}")
+        print(f"\n== screenshot {args.shot}")
     except Exception:
         pass
     return 0

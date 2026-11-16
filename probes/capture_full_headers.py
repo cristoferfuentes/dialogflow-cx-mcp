@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Captura las CABECERAS COMPLETAS de una peticion que la consola hace al
-backend interno (clients6) y prueba a replicarla desde la propia pagina.
+"""Captures the FULL HEADERS of a request the console makes to the
+internal backend (clients6) and tries to replay it from the page itself.
 
-Salida: /tmp/full_headers.json
+Output: /tmp/full_headers.json
 """
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import targets_de_sonda
 
-# El objetivo (agente, flow, pagina) sale del entorno:
-#   CXP_PROBE_TARGETS="por_defecto=agente,flow,pagina"
+from cxp.config import load_config
+
+# The target (agent, flow, page) comes from the environment:
+#   CXP_PROBE_TARGETS="por_defecto=agent,flow,page"
 TARGET = next(iter(targets_de_sonda().values()), {"agent": "", "flow": "", "page": ""})
 URL = (
     "https://conversational-agents.cloud.google.com/projects/{p}/locations/global"
@@ -53,21 +53,21 @@ def main() -> int:
     try:
         page.goto(URL, wait_until="domcontentloaded", timeout=90_000)
     except Exception as exc:
-        print(f"== goto fallo: {exc}")
+        print(f"== goto failed: {exc}")
     time.sleep(9)
 
     flows = [c for c in captured if "/flows?" in c["url"]]
-    print(f"== peticiones capturadas: {len(captured)} (flows: {len(flows)})")
+    print(f"== captured requests: {len(captured)} (flows: {len(flows)})")
     out = {}
     if flows:
         f = flows[-1]
         out["sample_flow_request"] = f
-        print("\n== CABECERAS COMPLETAS de la peticion de flows:")
+        print("\n== FULL HEADERS of the flows request:")
         for k, v in sorted(f["headers"].items()):
             print(f"   {k}: {v[:160]}")
         print(f"\n== url: {f['url']}")
 
-    # Replicar la llamada desde la pagina: el navegador pone sus cookies.
+    # Replay the call from the page: the browser adds its cookies.
     if flows:
         hdrs = {k: v for k, v in flows[-1]["headers"].items()
                 if k.lower() not in ("cookie", "host", "content-length", "origin",
@@ -81,15 +81,15 @@ def main() -> int:
                 }""",
                 {"url": flows[-1]["url"], "headers": hdrs},
             )
-            print("\n== replicado DESDE LA PAGINA:", res["status"])
+            print("\n== replayed FROM THE PAGE:", res["status"])
             print("   ", " ".join(res["body"].split())[:300])
             out["replay_in_page"] = res
         except Exception as exc:
-            print(f"\n== replay fallo: {type(exc).__name__}: {exc}")
+            print(f"\n== replay failed: {type(exc).__name__}: {exc}")
             out["replay_in_page"] = {"error": str(exc)}
 
     Path("/tmp/full_headers.json").write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
-    print("\n== escrito /tmp/full_headers.json")
+    print("\n== written /tmp/full_headers.json")
     return 0
 
 

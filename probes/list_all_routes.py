@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Lista TODAS las transition routes de una pagina en la consola, aunque la
-lista este virtualizada (solo renderiza las visibles).
+"""Lists ALL the transition routes of a page in the console, even when the
+list is virtualized (it only renders the visible ones).
 
-Recorre el contenedor con scroll y recoge la condicion de cada tarjeta.
+It walks the container with scroll and collects the condition of each card.
 """
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 FRAME_URL = (
@@ -39,7 +39,7 @@ JS_SCROLL = """
     if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) { sc = el; break; }
     el = el.parentElement;
   }
-  if (!sc) return {ok:false, reason:'sin contenedor con scroll'};
+  if (!sc) return {ok:false, reason:'no scrollable container'};
   sc.scrollTop = top;
   return {ok:true, cls:(sc.className||'').toString().slice(0,60), sh:sc.scrollHeight, ch:sc.clientHeight, top:sc.scrollTop};
 }
@@ -79,17 +79,17 @@ def main() -> int:
         conds = page.evaluate(JS_CONDS)
         nuevos = [c for c in conds if c not in vistas]
         vistas.extend(nuevos)
-        print(f"== scrollTop={top} {info}  -> {len(conds)} visibles, {len(vistas)} acumuladas", flush=True)
+        print(f"== scrollTop={top} {info}  -> {len(conds)} visible, {len(vistas)} accumulated", flush=True)
         if not nuevos and top > 0:
             break
 
-    print(f"\n== {len(vistas)} rutas:")
+    print(f"\n== {len(vistas)} routes:")
     for i, c in enumerate(vistas):
         print(f"   [{i}] {c}", flush=True)
 
     if args.out:
         Path(args.out).write_text(json.dumps(vistas, indent=1, ensure_ascii=False), encoding="utf-8")
-        print(f"== escrito {args.out}", flush=True)
+        print(f"== written {args.out}", flush=True)
     return 0
 
 

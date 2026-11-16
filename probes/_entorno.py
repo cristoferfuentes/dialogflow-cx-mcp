@@ -1,11 +1,11 @@
-"""Configuracion compartida por las sondas: **nada cableado**.
+"""Shared configuration for the probes: **nothing hardwired**.
 
-Los ids de agente que usan las sondas se toman del entorno:
+The agent ids used by the probes are taken from the environment:
 
     CXP_PROBE_AGENTS="original=uuid1,uuid2;clon=uuid3,uuid4"
 
-Si no se pone nada, se usa el agente por defecto del `.env`
-(`CXP_DEFAULT_AGENT`), bajo la clave `por_defecto`.
+If nothing is set, the default agent from the `.env`
+(`CXP_DEFAULT_AGENT`) is used, under the `por_defecto` key.
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ from cxp.config import load_config  # noqa: E402
 
 
 def agentes_de_sonda() -> dict[str, tuple[str, ...]]:
-    """Los agentes que usa la sonda, por nombre.
+    """The agents used by the probe, by name.
 
-    Formato: `CXP_PROBE_AGENTS="original=uuid1,uuid2;clon=uuid3"`.
+    Format: `CXP_PROBE_AGENTS="original=uuid1,uuid2;clon=uuid3"`.
     """
     out: dict[str, tuple[str, ...]] = {}
     for parte in os.environ.get("CXP_PROBE_AGENTS", "").split(";"):
@@ -39,16 +39,16 @@ def agentes_de_sonda() -> dict[str, tuple[str, ...]]:
 
 
 def agente(nombre: str = "por_defecto") -> str:
-    """El primer id de un grupo de agentes de la sonda (o el del `.env`)."""
+    """The first id of a probe agent group (or the one from the `.env`)."""
     grupos = agentes_de_sonda()
     ids = grupos.get(nombre) or next(iter(grupos.values()), ())
     return ids[0] if ids else ""
 
 
 def targets_de_sonda() -> dict[str, dict[str, str]]:
-    """Los (agente, flow, pagina) que usan las sondas, por nombre.
+    """The (agent, flow, page) triples used by the probes, by name.
 
-    Formato: `CXP_PROBE_TARGETS="clon=agente,flow,pagina;otro=agente,flow,pagina"`.
+    Format: `CXP_PROBE_TARGETS="clon=agent,flow,page;otro=agent,flow,page"`.
     """
     out: dict[str, dict[str, str]] = {}
     for parte in os.environ.get("CXP_PROBE_TARGETS", "").split(";"):

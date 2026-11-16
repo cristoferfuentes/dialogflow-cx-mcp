@@ -125,6 +125,43 @@ async def main() -> int:
                                                             "scope": "Tool",
                                                             "incluir_paginas": False}))
             check("cx_gaps filtra por scope", "error" not in g2, str(g2)[:120])
+            cob = g.get("cobertura") or {}
+            check("cx_gaps dice la cobertura",
+                  (cob.get("colecciones_del_descriptor") or 0) > 0
+                  and (cob.get("colecciones_alcanzadas") or 0) > 0,
+                  str(cob))
+            check("cx_gaps trae los huecos de METODO",
+                  len(g.get("huecos_de_metodo") or []) > 0)
+
+            # ------------------------------------------- huecos de METODO
+            print("\n== cx_endpoints_consola (endpoints fuera del descriptor) ==")
+            ec = _first(await session.call_tool("cx_endpoints_consola", {}))
+            check("cx_endpoints_consola devuelve el catalogo",
+                  (ec.get("total") or 0) >= 8, f"n={ec.get('total')}")
+            sys_types = _first(await session.call_tool("cx_endpoints_consola",
+                                                       {"endpoint": "systemEntityTypes.list"}))
+            check("llama a un endpoint fuera del descriptor",
+                  sys_types.get("estado") == "ok"
+                  and bool((sys_types.get("datos") or {}).get("systemEntityTypes")),
+                  str(sys_types.get("error"))[:150])
+
+            # ------------------------------- cx_api con version y rutas absolutas
+            print("\n== cx_api: version y rutas absolutas ==")
+            v3a = _first(await session.call_tool("cx_api", {
+                "method": "GET",
+                "path": "projects/{project}/locations/{location}/agents/{agent}/currentUsers",
+                "params": {"project": st.get("proyecto"), "location": st.get("location"),
+                           "agent": agente},
+                "version": "v3alpha1"}))
+            check("cx_api alcanza un endpoint de v3alpha1",
+                  "error" not in v3a and bool((v3a.get("datos") or {}).get("currentUsers")),
+                  str(v3a.get("error"))[:150])
+            raiz = _first(await session.call_tool("cx_api", {
+                "method": "GET", "path": "/users/me/userSettings/recentProjects",
+                "version": "v3alpha1"}))
+            check("cx_api alcanza una ruta ABSOLUTA desde la raiz",
+                  "error" not in raiz and bool((raiz.get("datos") or {}).get("projects")),
+                  str(raiz.get("error"))[:150])
 
             # ------------------------------------------------- recursos temporales
             print("\n== recursos temporales ==")
@@ -228,7 +265,7 @@ async def main() -> int:
                 # ------------------------------- limites (la memoria del MCP)
                 print("\n== cx_limites_api ==")
                 lim = _first(await session.call_tool("cx_limites_api", {}))
-                ids = {l.get("id") for l in (lim.get("limites") or [])}
+                ids = {x.get("id") for x in (lim.get("limites") or [])}
                 check("cx_limites_api devuelve limites", len(ids) > 5, f"n={len(ids)}")
                 check("incluye el limite de los campos fuera de esquema",
                       "campos_fuera_de_esquema" in ids, ", ".join(sorted(ids))[:120])

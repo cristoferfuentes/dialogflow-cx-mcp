@@ -1,21 +1,21 @@
-"""Importa cookies de sesion de Google al perfil persistente del navegador.
+"""Imports Google session cookies into the persistent browser profile.
 
-Por que existe: en esta maquina el navegador NO puede completar el flujo de
-login de `accounts.google.com` (medido: el handshake se queda colgado), pero
-las cookies de sesion son portables. El usuario puede exportar las cookies de
-SU Chrome de escritorio (donde si entra a Google, con su VPN) y el MCP las
-carga aqui para operar con primera parte (SAPISIDHASH).
+Why it exists: on this machine the browser CANNOT complete the login flow of
+`accounts.google.com` (measured: the handshake hangs), but the session cookies
+are portable. The user can export the cookies from THEIR desktop Chrome
+(where they do log into Google, with their VPN) and the MCP loads them here to
+operate with first party (SAPISIDHASH).
 
-Uso:
-    .venv/bin/python import_cookies.py <cookies.json> [--url <url de comprobacion>]
+Usage:
+    .venv/bin/python import_cookies.py <cookies.json> [--url <check url>]
 
-Formatos aceptados para <cookies.json>:
-  1. Lista de objetos estilo Playwright:
+Accepted formats for <cookies.json>:
+  1. List of Playwright-style objects:
      [{"name":"__Secure-3PSID","value":"...","domain":".google.com","path":"/"}, ...]
-  2. El volcado de Playwright `storage_state`:
+  2. The Playwright `storage_state` dump:
      {"cookies":[{"name":...,"value":...,"domain":...}], "origins":[...]}
-  3. Un objeto simple {"__Secure-3PSID": "...", "SAPISID": "..."}
-     (se asume domain=".google.com", path="/")
+  3. A simple object {"__Secure-3PSID": "...", "SAPISID": "..."}
+     (domain is assumed to be ".google.com", path "/")
 """
 from __future__ import annotations
 
@@ -30,17 +30,17 @@ from cxp.auth import pick_sapisid
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-# Cookies que hacen falta para la primera parte (UDS) de Google.
+# Cookies needed for the Google first party (UDS).
 NEEDED = ("__Secure-3PSID", "SAPISID", "__Secure-1PSID", "SID", "HSID", "SSID", "APISID")
 
 
 def normalize(raw: object) -> list[dict]:
-    """Convierte cualquiera de los 3 formatos admitidos a la lista de Playwright."""
+    """Converts any of the 3 supported formats to the Playwright list."""
     cookies: list[dict] = []
     if isinstance(raw, dict) and "cookies" in raw:
         raw = raw["cookies"]
     if isinstance(raw, dict):
-        # {nombre: valor}
+        # {name: value}
         for name, value in raw.items():
             cookies.append({"name": name, "value": value, "domain": ".google.com", "path": "/"})
         return cookies
@@ -71,43 +71,43 @@ def normalize(raw: object) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cookies", help="fichero JSON con las cookies")
+    ap.add_argument("cookies", help="JSON file with the cookies")
     ap.add_argument("--url", default="https://conversational-agents.cloud.google.com/")
-    ap.add_argument("--keep-open", action="store_true", help="deja el navegador abierto")
+    ap.add_argument("--keep-open", action="store_true", help="leaves the browser open")
     args = ap.parse_args()
 
     raw = json.loads(Path(args.cookies).read_text(encoding="utf-8"))
     cookies = normalize(raw)
     found = {c["name"] for c in cookies} & set(NEEDED)
-    print(f"== cookies leidas: {len(cookies)}; de sesion: {sorted(found)}", flush=True)
+    print(f"== cookies read: {len(cookies)}; session ones: {sorted(found)}", flush=True)
     if not found:
-        print("== AVISO: no hay ninguna cookie de sesion de Google en el fichero", flush=True)
+        print("== WARNING: there is no Google session cookie in the file", flush=True)
 
     cfg = load_config()
     br = ConsoleBrowser(cfg)
     br._launch(headless=True)
     br._ctx.add_cookies(cookies)
-    print(f"== inyectadas {len(cookies)} cookies en el perfil", flush=True)
+    print(f"== {len(cookies)} cookies injected into the profile", flush=True)
 
     try:
         br.open_console(args.url, wait_ms=3000)
     except Exception as exc:
-        print(f"== la navegacion fallo: {type(exc).__name__}: {str(exc)[:90]}", flush=True)
+        print(f"== the navigation failed: {type(exc).__name__}: {str(exc)[:90]}", flush=True)
 
     ok, reason, email = br._looks_logged_in()
-    print(f"== sesion: logged_in={ok}  ({reason})  email={email}", flush=True)
+    print(f"== session: logged_in={ok}  ({reason})  email={email}", flush=True)
 
     sap = pick_sapisid(br.cookies())
     if sap:
-        print("== SAPISID disponible: la primera parte (UDS) va a funcionar", flush=True)
+        print("== SAPISID available: the first party (UDS) will work", flush=True)
         try:
             br._ctx.storage_state(path=str(cfg.state_file))
-            print(f"== estado guardado en {cfg.state_file}", flush=True)
+            print(f"== state saved in {cfg.state_file}", flush=True)
         except Exception as exc:
-            print(f"== no se pudo guardar el estado: {exc}", flush=True)
+            print(f"== the state could not be saved: {exc}", flush=True)
 
     if args.keep_open:
-        print("== navegador abierto; pulsa Ctrl+C para salir", flush=True)
+        print("== browser open; press Ctrl+C to exit", flush=True)
         try:
             while True:
                 br._page.wait_for_timeout(1000)

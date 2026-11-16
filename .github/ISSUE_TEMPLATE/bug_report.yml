@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the MCP does not behave as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This project's golden rule is **"if you claim it,
+        measure it"**, so the more you can show, the faster it gets fixed.
+
+        ⚠️ **Never paste cookies, API keys or a `.env` here.** If your report needs
+        them, describe the shape instead (for example: "the cookie header had 23
+        entries and the 5 mandatory ones were present").
+
+  - type: input
+    id: version
+    attributes:
+      label: MCP version
+      placeholder: "0.3.0 (or the commit sha)"
+    validations:
+      required: true
+
+  - type: input
+    id: tool
+    attributes:
+      label: Which tool?
+      placeholder: "cx_gaps, cx_set_console_field, cx_api…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected vs what you got.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        The exact tool call and its arguments, plus the exact response you got.
+        Redact project ids, agent ids and cookies.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        - MCP version / commit
+        - Python version
+        - OS
+        - Location (`global` or a region)
+        - Is this the first call after copying the cookie header?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran `cx_status` first and `credenciales_ok` and `sesion_aceptada` are `true`.
+        - label: I removed credentials, project ids and agent ids from this report.

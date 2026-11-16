@@ -1,18 +1,18 @@
-"""El espejo de la API v3beta1.
+"""The API v3beta1 mirror.
 
-El backend interno de la consola (`dialogflow.clients6.google.com`) sirve el
-**mismo discovery doc** que la API publica, pero con la version que se le pida
-(`v3beta1`, `v3alpha1`, `v3`). Eso permite dos cosas:
+The console's internal backend (`dialogflow.clients6.google.com`) serves the
+**same discovery doc** as the public API, but with whichever version is requested
+(`v3beta1`, `v3alpha1`, `v3`). That enables two things:
 
-1. **Reflejo fiel**: el mapa de recursos y metodos sale del descriptor oficial
-   (162 metodos / 32 recursos en v3beta1), no de una lista escrita a mano que
-   se queda obsoleta.
-2. **El agregado**: el backend interno es el unico que conserva
-   `transitionRoutes[].targetPlaybook` (la API publica lo descarta en
-   silencio). El proto publico no lo tiene -> hay que leer el discovery doc
-   del backend, no el de `dialogflow.googleapis.com`.
+1. **Faithful reflection**: the map of resources and methods comes from the official descriptor
+   (162 methods / 32 resources in v3beta1), not from a hand-written list that
+   goes stale.
+2. **The aggregate**: the internal backend is the only one that keeps
+   `transitionRoutes[].targetPlaybook` (the public API drops it
+   silently). The public proto does not have it -> you must read the backend's discovery doc,
+   not `dialogflow.googleapis.com`'s.
 
-Descripcion de los metodos:
+Method description:
 
     mirrors = Mirror(cfg)
     mirrors.method_ids()          # ['agents.list', 'agents.flows.train', ...]
@@ -48,29 +48,33 @@ def _method_id(resource_path: str, method_name: str) -> str:
 
 
 class Mirror:
-    """Mapa de la API (v3beta1 por defecto) tal y como lo declara el backend."""
+    """Map of the API (v3beta1 by default) as declared by the backend."""
 
     def __init__(self, cfg: Config, session: Session | None = None):
         self.cfg = cfg
         self.http = session or Session(timeout=cfg.socket_timeout, maxseg=cfg.tcp_maxseg,
                                         retries=cfg.http_retries,
                                         connect_timeout=cfg.connect_timeout)
-        self._doc: dict[str, Any] | None = None
+        self._docs: dict[str, dict[str, Any]] = {}
 
     # --------------------------------------------------------------- discovery
     def _cache_path(self, version: str) -> Path:
         return CACHE_DIR / f"{version}.json"
 
-    def load(self, force: bool = False) -> dict[str, Any]:
-        """Descarga (y cachea) el discovery doc del backend interno."""
-        if self._doc is not None and not force:
-            return self._doc
-        version = self.cfg.api_version
+    def load(self, force: bool = False, version: str = "") -> dict[str, Any]:
+        """Download (and cache) the discovery doc of the internal backend.
+
+        The backend serves `v3beta1`, `v3alpha1`, `v3` and `v2beta1` with the same
+        discovery doc that API publishes: that is why a specific version
+        can be requested and not only the one from `cfg.api_version`."""
+        version = version or self.cfg.api_version
+        if version in self._docs and not force:
+            return self._docs[version]
         path = self._cache_path(version)
         if path.exists() and not force:
             try:
-                self._doc = json.loads(path.read_text(encoding="utf-8"))
-                return self._doc
+                self._docs[version] = json.loads(path.read_text(encoding="utf-8"))
+                return self._docs[version]
             except ValueError:
                 pass
         url = f"https://{DISCOVERY_HOST}/$discovery/rest?version={version}"
@@ -88,7 +92,7 @@ class Mirror:
         if status >= 400:
             raise HttpStatusError(status, text)
         doc = json.loads(text)
-        self._doc = doc
+        self._docs[version] = doc
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
@@ -96,7 +100,7 @@ class Mirror:
             pass
         return doc
 
-    # ------------------------------------------------------------------ indice
+    # ------------------------------------------------------------------ index
     def _walk(self, node: dict, prefix: str = "") -> dict[str, dict]:
         out: dict[str, dict] = {}
         for name, res in (node or {}).items():
@@ -106,24 +110,24 @@ class Mirror:
             out.update(self._walk(res.get("resources") or {}, f"{path}."))
         return out
 
-    def index(self) -> dict[str, dict]:
-        """Todos los metodos: id -> definicion."""
-        doc = self.load()
+    def index(self, version: str = "") -> dict[str, dict]:
+        """All methods: id -> definition."""
+        doc = self.load(version=version)
         return self._walk(doc.get("resources") or {})
 
-    def method_ids(self) -> list[str]:
-        return sorted(self.index())
+    def method_ids(self, version: str = "") -> list[str]:
+        return sorted(self.index(version))
 
-    def resources(self) -> dict[str, list[str]]:
-        """recurso -> lista de metodos."""
+    def resources(self, version: str = "") -> dict[str, list[str]]:
+        """resource -> list of methods."""
         out: dict[str, list[str]] = {}
-        for mid in self.method_ids():
+        for mid in self.method_ids(version):
             res = mid.rsplit(".", 1)[0]
             out.setdefault(res, []).append(mid)
         return {k: sorted(v) for k, v in sorted(out.items())}
 
-    def spec(self, method_id: str) -> dict:
-        idx = self.index()
+    def spec(self, method_id: str, version: str = "") -> dict:
+        idx = self.index(version)
         if method_id not in idx:
             raise MirrorError(
                 f"metodo desconocido: {method_id!r}. "
@@ -133,9 +137,9 @@ class Mirror:
         spec["id"] = method_id
         return spec
 
-    def describe(self, method_id: str) -> dict:
-        """Descripcion compacta de un metodo (para el agente)."""
-        spec = self.spec(method_id)
+    def describe(self, method_id: str, version: str = "") -> dict:
+        """Compact description of a method (for the agent)."""
+        spec = self.spec(method_id, version)
         params = spec.get("parameters") or {}
         return {
             "id": method_id,
@@ -150,12 +154,17 @@ class Mirror:
             "respuesta": spec.get("response"),
         }
 
-    # -------------------------------------------------------------------- URL
+    # URL
     def url(self, method_id: str, *, name: str = "", parent: str = "",
             params: dict[str, Any] | None = None,
-            query: dict[str, Any] | None = None) -> tuple[str, str]:
-        """Devuelve (url, http_method) para invocar el metodo."""
-        spec = self.spec(method_id)
+            query: dict[str, Any] | None = None,
+            version: str = "") -> tuple[str, str]:
+        """Returns (url, http_method) to invoke the method.
+
+        `version` allows requesting the method in another version of the proto served
+        by the backend (`v3beta1`, `v3alpha1`, `v3`)."""
+        version = version or self.cfg.api_version
+        spec = self.spec(method_id, version)
         template = spec.get("path") or ""
         http = spec.get("httpMethod") or "GET"
         values: dict[str, Any] = {}
@@ -180,7 +189,7 @@ class Mirror:
                 f"faltan parametros para {method_id}: {sorted(set(missing))} "
                 f"(plantilla: {template})"
             )
-        # La plantilla empieza por la version ("v3beta1/{+name}").
+        # The template starts with the version ("v3beta1/{+name}").
         path = re.sub(r"^v[0-9a-z]+/", "", path)
         if not path.startswith("/"):
             path = "/" + path
@@ -190,15 +199,19 @@ class Mirror:
         for k, v in (query or {}).items():
             if v is not None:
                 q[k] = v
-        # Los parametros de path que no se han usado tambien pueden ir en query
-        # (p. ej. `languageCode`).
-        return (f"https://{DISCOVERY_HOST}/{self.cfg.api_version}{path}?{urlencode(q)}",
+        # Path parameters that were not used can also go in the query
+        # (e.g. `languageCode`).
+        # MEASURED (2026-11-15): the host depends on the LOCATION of the path: for
+        # `global` it is the global host and for the rest, the regional host
+        # (`{location}-dialogflow.clients6.google.com`).
+        from .console_api import host_de_path
+        return (f"https://{host_de_path(path)}/{version}{path}?{urlencode(q)}",
                 http)
 
     # ------------------------------------------------------------- shortcuts
     def resource_name(self, agent_id: str, *parts: str, project: str = "",
                       location: str = "") -> str:
-        """Nombre completo de un recurso: projects/p/locations/l/agents/a/flows/f."""
+        """Full name of a resource: projects/p/locations/l/agents/a/flows/f."""
         project = project or self.cfg.project
         location = location or self.cfg.location
         base = f"projects/{project}/locations/{location}/agents/{agent_id}"

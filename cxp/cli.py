@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
-"""CLI de `cx-playbook`: la misma logica del MCP, desde la terminal.
+# #!/usr/bin/env python3
+"""`cx-playbook` CLI: the same logic as MCP, from the terminal.
 
     .venv/bin/python -m cxp.cli status
-    .venv/bin/python -m cxp.cli login                 # abre el navegador para el login
-    .venv/bin/python -m cxp.cli routes   --flow <flow> --page <pagina>
-    .venv/bin/python -m cxp.cli set      --page <pagina> --route 6 --playbook <playbook>
-    .venv/bin/python -m cxp.cli verify   --canal <canal> --es-cliente true
-"""
+    .venv/bin/python -m cxp.cli login                 # opens the browser for login
+    .venv/bin/python -m cxp.cli routes   --flow <flow> --page <page>
+    .venv/bin/python -m cxp.cli set      --page <page> --route 6 --playbook <playbook>
+    .venv/bin/python -m cxp.cli verify   --canal <canal> --es-cliente true"""
 from __future__ import annotations
 
 import argparse

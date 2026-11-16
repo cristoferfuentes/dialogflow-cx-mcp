@@ -1,18 +1,17 @@
-"""Automacion de la CONSOLA (UI) para poner un playbook como destino de una ruta.
+"""Automation of CONSOLE (UI) to set a playbook as the target of a route.
 
-Por que hace falta ademas de la API: el backend de la consola
-(`dialogflow.clients6.google.com`) tiene el proto interno con `targetPlaybook`, y
-escribe con **autenticacion de primera parte** (cookies de Google), que es un
- camino distinto (y mas barato) que el `PATCH` con token de servicio.
+Why it is needed in addition to API: the console backend
+(`dialogflow.clients6.google.com`) has the internal proto with `targetPlaybook`, and
+writes with **first-party authentication** (Google cookies), which is a
+ different (and cheaper) path than the `PATCH` with a service token.
 
-Reglas de seguridad (esta clase NUNCA adivina):
+Safety rules (this NEVER class guesses):
 
-* Solo escribe en el agente indicado; el original se rechaza antes de abrir la UI.
-* **Verifica antes y despues**: el destino de la ruta debe cambiar de "sin
-  destino" al displayName del playbook. Si no se puede leer el estado, aborta.
-* Ante cualquier ambiguedad (varios elementos que coinciden, boton no encontrado)
-  **aborta y vuelca el DOM** para diagnostico: nunca hace un clic a ciegas.
-"""
+* It only writes to the indicated agent; the original is rejected before opening the UI.
+* **Verifies before and after**: the route target must change from "sin
+  destino" to the playbook's displayName. If the state cannot be read, it aborts.
+* On any ambiguity (several matching elements, button not found)
+  **aborts and dumps the DOM** for diagnosis: it never clicks blindly."""
 from __future__ import annotations
 
 import re
@@ -20,7 +19,7 @@ from typing import Any
 
 from .config import Config
 
-# La consola se sirve en en_US (bundle: dialogflow-console.vertex_ai_v2.en_US).
+# The console is served at en_US (bundle: dialogflow-console.vertex_ai_v2.en_US).
 PLAYBOOK_LABEL = re.compile(r"playbook", re.I)
 SAVE_LABELS = ("Save", "SAVE", "Guardar", "Apply", "Done")
 CONDITION_HINTS = ("Condition", "condition")
@@ -36,7 +35,7 @@ class ConsoleRouteEditor:
         self.cfg = cfg
         self.page = browser._page
 
-    # ------------------------------------------------------------- utilidades
+    # ------------------------------------------------------------- utilities
     def _dump(self, limit: int = 6000) -> str:
         try:
             return (self.page.content() or "")[:limit]
@@ -49,7 +48,7 @@ class ConsoleRouteEditor:
         except Exception:
             return []
 
-    # ------------------------------------------------------------- navegacion
+    # ------------------------------------------------------------- navigation
     def open_page(self, agent_id: str, flow_id: str, page_id: str, panel: str = "simulator"):
         url = self.cfg.console_url(agent_id, flow_id, page_id, panel=panel)
         self.page.goto(url, wait_until="domcontentloaded", timeout=90_000)
@@ -57,7 +56,7 @@ class ConsoleRouteEditor:
         return url
 
     def open_routes_panel(self) -> None:
-        """Abre la seccion de rutas de la pagina (pestana 'Routes'/'Transition routes')."""
+        """Open the page's routes section ('Routes'/'Transition routes' tab)."""
         for label in ("Routes", "Transition routes", "transitionRoutes", "Rutas"):
             loc = self.page.get_by_text(label, exact=False).first
             try:
@@ -67,14 +66,14 @@ class ConsoleRouteEditor:
                     return
             except Exception:
                 continue
-        # fallback: la consola nueva puede mostrar las rutas en el panel derecho
+        # fallback: the new console can show the routes in the right panel
         raise ConsoleUiError(
             "no se encontro la pestana de rutas. DOM:\n" + self._dump()
         )
 
-    # ------------------------------------------------------------- las rutas
+    # ------------------------------------------------------------- the routes
     def route_row(self, condition: str) -> Any:
-        """Localiza la fila de la ruta por su condicion (coincidencia EXACTA)."""
+        """Locate the route row by its condition (EXACT match)."""
         exact = self.page.get_by_text(condition, exact=True)
         try:
             n = exact.count()
@@ -83,7 +82,7 @@ class ConsoleRouteEditor:
         if n == 1:
             return exact.first
         if n == 0:
-            # coincidencia por fragmento unico
+            # unique-fragment match
             frag = self.page.get_by_text(condition[:60], exact=False)
             try:
                 if frag.count() == 1:
@@ -102,14 +101,14 @@ class ConsoleRouteEditor:
         )
 
     def destination_text(self, row: Any) -> str:
-        """El texto del destino que la consola muestra para esa ruta."""
+        """The target text that the console shows for that route."""
         try:
             txt = row.inner_text()
         except Exception:
             txt = ""
         return txt
 
-    # ------------------------------------------------------------- la escritura
+    # ------------------------------------------------------------- the write
     def set_destination_to_playbook(
         self,
         agent_id: str,
@@ -118,7 +117,7 @@ class ConsoleRouteEditor:
         condition: str,
         playbook_display_name: str,
     ) -> dict:
-        # Guarda de solo lectura: el original NUNCA se escribe, ni por la UI.
+        # Read-only guard: the original NEVER is written, not even by the UI.
         from .guard import assert_writable
 
         assert_writable(agent_id, self.cfg)
@@ -134,11 +133,11 @@ class ConsoleRouteEditor:
                 "url": url,
             }
 
-        # 1) abrir el editor de la ruta
+        # 1) open the route editor
         row.click()
         self.page.wait_for_timeout(1200)
 
-        # 2) el desplegable de destino
+        # 2) the target dropdown
         selects = self.page.locator("mat-select")
         target_select = None
         for i in range(selects.count()):
@@ -157,7 +156,7 @@ class ConsoleRouteEditor:
         target_select.click()
         self.page.wait_for_timeout(900)
 
-        # 3) elegir el TIPO de destino "Playbook"
+        # 3) choose the target TYPE "Playbook"
         opt = self.page.locator("mat-option").filter(has_text=PLAYBOOK_LABEL).first
         try:
             if opt.count() == 0:
@@ -173,7 +172,7 @@ class ConsoleRouteEditor:
                 f"fallo al elegir 'Playbook': {exc}\nDOM:\n" + self._dump()) from exc
         self.page.wait_for_timeout(1500)
 
-        # 4) elegir el playbook concreto en el selector de recursos
+        # 4) choose the specific playbook in the resource selector
         picker = self.page.locator("input[placeholder*='Filter'], input[placeholder*='filter'], input[placeholder*='Search'], input[placeholder*='search']").first
         try:
             if picker.count() > 0:
@@ -192,7 +191,7 @@ class ConsoleRouteEditor:
         item.click()
         self.page.wait_for_timeout(1500)
 
-        # 5) guardar
+        # 5) save
         saved = False
         for label in SAVE_LABELS:
             btn = self.page.get_by_role("button", name=label, exact=True).first
@@ -206,7 +205,7 @@ class ConsoleRouteEditor:
         if not saved:
             raise ConsoleUiError("no se encontro el boton de guardar. DOM:\n" + self._dump())
 
-        # 6) ESPERAR y VERIFICAR: la consola muestra el destino en la fila
+        # 6) WAIT and VERIFY: the console shows the target in the row
         self.page.wait_for_timeout(6000)
         try:
             self.page.wait_for_load_state("networkidle", timeout=60_000)

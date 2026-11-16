@@ -1,0 +1,138 @@
+"""How a route against the console backend is built.
+
+The internal backend (`dialogflow.clients6.google.com`) serves **several versions**
+of the proto and also has endpoints that are **not in any descriptor** (the
+ones the console itself uses). To reach them an ONLY rule is needed that
+is explicit and generic:
+
+    "v3alpha1/projects/p/locations/global/agents/a/currentUsers"   -> version + absolute
+    "projects/p/agent/visibility"                                   -> absolute (it is already of a project)
+    "/users/me/userSettings/recentProjects"                         -> ABSOLUTE from the root
+    "agents/{agent}/flows"                                          -> relative (it is prefixed)
+
+Rules (in this order):
+
+1. If the route starts with `v.../` (`v3`, `v3beta1`, `v3alpha1`, `v2beta1`...),
+   that prefix IS the version of the call and is stripped from the route.
+2. If the route starts with `/`, it is **absolute from the backend root**: `projects/.../locations/...` is
+   not prepended (this is how endpoints that
+   do not hang off a project are reached, such as `users/me/userSettings/recentProjects`).
+3. If the route starts with `projects/`, it is left as is (regardless of whether the
+   project is another one or whether it carries `locations`).
+4. In any other case it is **relative**: `projects/{proyecto}/locations/{location}/` is
+   prepended.
+
+This module does no network: it only resolves. That makes it trivial to test."""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+# `v3`, `v3beta1`, `v3alpha1`, `v2beta1`, `v2`...
+VERSION_RE = re.compile(r"^(v[0-9]+(?:[a-z]+[0-9]*)?)(?=/|$)")
+
+# The versions the backend serves (measured: all four respond; `v2beta1`
+# only for `agent/visibility` and `conversationProfiles`).
+VERSIONES_SERVIDAS = ("v3beta1", "v3alpha1", "v3", "v2beta1")
+
+
+class PathError(ValueError):
+    pass
+
+
+def split_version(path: str) -> tuple[str, str]:
+    """Splits the version prefix from a route.
+
+    `("v3alpha1/users/me", "v3alpha1")` -> `("users/me", "v3alpha1")`
+    `("users/me", "")`                  -> `("users/me", "")`
+    """
+    p = (path or "").strip()
+    m = VERSION_RE.match(p)
+    if not m:
+        return p, ""
+    version = m.group(1)
+    resto = p[m.end():]
+    if resto.startswith("/"):
+        resto = resto[1:]
+    return resto, version
+
+
+def es_absoluta(path: str) -> bool:
+    """`True` if the route should not receive the proyecto/location prefix."""
+    p = (path or "").strip()
+    return p.startswith("/") or p.startswith("projects/")
+
+
+def resolve_path(path: str, *, version: str = "", project: str = "",
+                 location: str = "", name: str = "", parent: str = "",
+                 params: dict[str, Any] | None = None,
+                 agent: str = "") -> tuple[str, str, str]:
+    """Resolve a request route.
+
+    Returns `(ruta_final, version_final, query_extra)`.
+
+    - `ruta_final`: without version and without host prefix ("projects/p/...").
+    - `version_final`: the version to use (the route's if it carries one, otherwise
+      the one passed in, otherwise `v3beta1`).
+    - `query_extra`: parameters moved to the query because the
+      discovery doc did not carry them (e.g. `languageCode`)."""
+    p, version_ruta = split_version(path)
+    version_final = version_ruta or version or "v3beta1"
+
+    values: dict[str, Any] = dict(params or {})
+    if name:
+        values["name"] = name
+    if parent:
+        values["parent"] = parent
+
+    # A marker with no value is an error, not an empty string: better to fail
+    # here than to send "projects//agents/". The value may come in `params`.
+    for marcador, valor in (("{project}", project), ("{location}", location),
+                            ("{agent}", values.get("agent") or agent)):
+        if marcador in p and not valor:
+            raise PathError(f"falta el valor de {marcador} en {path!r}")
+
+    # Full names can be passed on their own: if `name` is a resource `name`
+    # and the path is a template, it is used as the value of `{name}`.
+    # `{+name}` is the "the value IS the route" form of the discovery doc.
+    for k, v in values.items():
+        p = p.replace("{" + k + "}", str(v))
+        p = p.replace("{+" + k + "}", str(v).lstrip("/"))
+
+    if "{agent}" in p and not values.get("agent"):
+        values["agent"] = agent or ""
+        p = p.replace("{agent}", str(values["agent"]))
+
+    if not p:
+        raise PathError("ruta vacia")
+
+    # --- prefixes ---------------------------------------------------------
+    if p.startswith("/"):
+        p = p[1:]
+    elif not p.startswith("projects/"):
+        if not project:
+            raise PathError(f"hace falta el proyecto para la ruta relativa {path!r}")
+        p = f"projects/{project}/locations/{location or 'global'}/{p}"
+
+    # The gaps in `{proyecto}` / `{location}` that may remain.
+    p = p.replace("{project}", project or "").replace("{location}", location or "global")
+
+    leftovers = re.findall(r"\{[A-Za-z0-9_.]+\}", p)
+    if leftovers:
+        raise PathError(f"faltan parametros para el path: {sorted(set(leftovers))}")
+
+    # Parameters not present in the template are query parameters.
+    usados = set(re.findall(r"\{([A-Za-z0-9_.]+)\}", path))
+    query_extra = {k: v for k, v in values.items()
+                   if k not in usados and k not in ("name", "parent", "agent")}
+    return p, version_final, query_extra
+
+
+def url_de(version: str, path: str, host: str, query: dict[str, Any] | None = None,
+           **extra: Any) -> str:
+    """URL backend completion for an already-resolved route."""
+    from urllib.parse import urlencode
+    q: dict[str, Any] = {k: v for k, v in (query or {}).items() if v is not None}
+    q.update({k: v for k, v in extra.items() if v is not None})
+    sufijo = f"?{urlencode(q)}" if q else ""
+    return f"https://{host}/{version}/{path.lstrip('/')}{sufijo}"

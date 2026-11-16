@@ -1,25 +1,24 @@
-"""Guardas de escritura/lectura por agente.
+"""Per-agent escritura/lectura guards.
 
-Por que un modulo aparte: el alias `"original"` se puede esquivar pasando el
-UUID crudo del agente. La guarda real compara el **id resuelto**, y se aplica
-en el punto mas bajo de la ruta de escritura (no solo en la capa MCP).
+Why a separate module: the `"original"` alias can be bypassed by passing the agent's
+raw UUID. The real guard compares the **resolved id**, and is applied
+at the lowest point of the write route (not only in the MCP layer).
 
-Modelo de permisos (lista blanca, por variables de entorno):
+Permission model (allowlist, via environment variables):
 
-    CXP_AGENT_READWRITE=<uuid>[,<uuid>]   leer + escribir
-    CXP_AGENT_READ=<uuid>[,<uuid>]        solo leer
-    CXP_PROJECTS=<proyecto>[,...]          (opcional) limita los proyectos
+    CXP_AGENT_READWRITE=<uuid>[,<uuid>]   read + write
+    CXP_AGENT_READ=<uuid>[,<uuid>]        read-only
+    CXP_PROJECTS=<project>[,...]          (optional) restricts projects
 
-Un agente **sin** entrada en ninguna de las dos listas NO es accesible: ni
-siquiera para leer. Las entradas admiten dos formas:
+An agent **without** an entry in either list is NOT accessible: not
+even for reading. Entries accept two forms:
 
-* `<uuid>` -> el permiso viaja con el uuid (vale en cualquier proyecto);
-* `<proyecto>/<uuid>` -> empareja proyecto y agente.
+* `<uuid>` -> the permission travels with the uuid (valid in any project);
+* `<proyecto>/<uuid>` -> matches project and agent.
 
-El proyecto se deduce del **path de la peticion**, no de `CXP_PROJECT`: asi el
-mismo MCP puede leer el agente de PROD (que vive en otro proyecto) con el mismo
-uuid en la lista de lectura.
-"""
+The project is derived from the **request path**, not from `CXP_PROJECT`: thus the
+same MCP can read the PROD agent (which lives in another project) with the same
+uuid in the read list."""
 from __future__ import annotations
 
 from .config import Config
@@ -28,22 +27,22 @@ LEVEL_NONE = "ninguno"
 LEVEL_READ = "lectura"
 LEVEL_READWRITE = "lectura/escritura"
 
-# Verbos que MODIFICAN estado: pasan por `assert_writable`.
+# Verbs that MODIFY state: go through `assert_writable`.
 WRITE_VERBS = ("POST", "PATCH", "PUT", "DELETE")
 
 _LEVELS = (LEVEL_NONE, LEVEL_READ, LEVEL_READWRITE)
 
 
 class PermissionDeniedError(PermissionError):
-    """El agente no tiene permiso para la operacion solicitada."""
+    """The agent does not have permission for the requested operation."""
 
 
 class ReadOnlyAgentError(PermissionDeniedError):
-    """Se intento escribir en un agente de solo lectura."""
+    """Attempted to write to a read-only agent."""
 
 
 def _norm(entry: str) -> tuple[str, str]:
-    """'proyecto/uuid' -> ('proyecto', 'uuid'); 'uuid' -> ('', 'uuid')."""
+    """'project/uuid' -> ('project', 'uuid'); 'uuid' -> ('', 'uuid')."""
     entry = (entry or "").strip()
     if "/" in entry:
         project, _, agent = entry.partition("/")
@@ -52,7 +51,7 @@ def _norm(entry: str) -> tuple[str, str]:
 
 
 def _matches(entry: str, project: str, agent_id: str) -> bool:
-    """La entrada cubre a (project, agent)?"""
+    """Does the input cover (project, agent)?"""
     entry_project, entry_agent = _norm(entry)
     if not entry_agent:
         return False
@@ -64,7 +63,7 @@ def _matches(entry: str, project: str, agent_id: str) -> bool:
 
 
 def agent_level(project: str, agent_id: str, cfg: Config) -> str:
-    """Nivel de permiso de (project, agent): 'lectura', 'lectura/escritura' o 'ninguno'."""
+    """Permission level for (project, agent): 'lectura', 'lectura/escritura' or 'ninguno'."""
     raw = (agent_id or "").strip()
     if not project and "/" in raw:
         project, _, raw = raw.partition("/")
@@ -81,12 +80,12 @@ def agent_level(project: str, agent_id: str, cfg: Config) -> str:
 
 
 def is_read_only(agent_id: str, cfg: Config) -> bool:
-    """Legacy: solo lectura (lista antigua `CXP_READ_ONLY_AGENTS`)."""
+    """Legacy: read-only (old list `CXP_READ_ONLY_AGENTS`)."""
     return bool(agent_id) and cfg.is_read_only(agent_id)
 
 
 def assert_readable(project: str, agent_id: str, cfg: Config) -> str:
-    """Devuelve el agent_id si se puede leer; si no, revienta."""
+    """Return the agent_id if it can be read; otherwise, crash."""
     agent_id = (agent_id or "").split("/")[-1]
     if cfg.projects and project and project not in cfg.projects:
         raise PermissionDeniedError(
@@ -103,15 +102,14 @@ def assert_readable(project: str, agent_id: str, cfg: Config) -> str:
 
 
 def agent_from_path(path: str) -> tuple[str, str]:
-    """(proyecto, agente) que aparecen en un path/URL de recurso.
+    """(project, agent) that appear in a resource path/URL.
 
-    Se descartan la query string y el **sufijo de metodo propio**:
-    `.../agents/{id}:export` -> el id es `{id}`, no `{id}:export`.
+    The query string and the **method's own suffix** are dropped:
+    `.../agents/{id}:export` -> the id is `{id}`, not `{id}:export`.
 
-    Sin esto, cualquier metodo con colon (`:export`, `:restore`, `:validate`)
-    se comparaba contra la lista blanca con el sufijo pegado -> la peticion se
-    rechazaba siempre ("no tiene permiso") aunque el agente fuera el clon.
-    """
+    Without this, any method with a colon (`:export`, `:restore`, `:validate`)
+    was compared against the allowlist with the suffix attached -> the request was
+    always rejected ("no tiene permiso") even if the agent was the clone."""
     path = (path or "").split("?")[0].split("#")[0]
     parts = path.split("/")
     project = ""
@@ -121,28 +119,26 @@ def agent_from_path(path: str) -> tuple[str, str]:
             project = parts[i + 1]
         if p == "agents" and i + 1 < len(parts):
             agent = parts[i + 1]
-    # `projects/p/locations/l/agents/AGENTE:metodo` -> `AGENTE`
+    # `projects/p/locations/l/agents/AGENT:method` -> `AGENT`
     if ":" in agent:
         agent = agent.split(":", 1)[0]
     return project, agent
 
 
 def assert_playbook_writable(project: str, agent_id: str, cfg: Config) -> str:
-    """Guarda especifica para ESCRIBIR un playbook.
+    """Specific guard for WRITE a playbook.
 
-    Un playbook solo se puede escribir en un agente de `CXP_AGENT_READWRITE`.
-    Esa lista debe contener **solo nuestra copia** del agente: el playbook de
-    un agente de referencia (el original, el de produccion, el de otro
-    equipo...) es de solo lectura por diseno, y editarlo romperia la paridad
-    con la consola.
-    """
+    A playbook can only be written in a `CXP_AGENT_READWRITE` agent.
+    That list must contain **only our copy** of the agent: the playbook of
+    a reference agent (the original, the production one, another team's...)
+    is read-only by design, and editing it would break parity with the console."""
     agent_id = (agent_id or "").split("/")[-1]
     assert_writable(project, agent_id, cfg)
     return agent_id
 
 
 def assert_writable(project: str, agent_id: str, cfg: Config) -> str:
-    """Devuelve el agent_id si se puede escribir; si no, revienta."""
+    """Return the agent_id if it is writable; otherwise, crash."""
     agent_id = (agent_id or "").split("/")[-1]
     assert_readable(project, agent_id, cfg)
     if agent_level(project, agent_id, cfg) != LEVEL_READWRITE:
@@ -154,7 +150,7 @@ def assert_writable(project: str, agent_id: str, cfg: Config) -> str:
 
 
 def permission_table(cfg: Config) -> list[dict]:
-    """Vista de los permisos configurados (para `cx_status`)."""
+    """View of the configured permissions (for `cx_status`)."""
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
     for entry in cfg.agent_readwrite + cfg.agent_read:
