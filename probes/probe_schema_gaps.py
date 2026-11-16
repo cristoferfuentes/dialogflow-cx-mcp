@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Sonda: campos que el BACKEND devuelve y el ESQUEMA PUBLICO v3beta1 no declara.
+"""Probe: fields that the BACKEND returns and the PUBLIC v3beta1 schema does not
+declare.
 
-Un campo que sale en el JSON real y no esta en el discovery doc publico es un
-AGUJERO de la API publica: la API publica no lo puede pedir ni escribir (o lo
-descarta en silencio), pero el backend interno de la consola si lo expone.
+A field that shows up in the real JSON and is not in the public discovery doc is a
+HOLE in the public API: the public API cannot ask for it nor write it (or it
+silently drops it), but the console's internal backend does expose it.
 """
 from __future__ import annotations
 
@@ -115,12 +116,12 @@ def main() -> int:
             for item in getter(agent, project):
                 feed(name, item, name)
         except Exception as exc:
-            print(f"# {name}: no se pudo leer ({exc})")
+            print(f"# {name}: it could not be read ({exc})")
 
-    print(f"\n== {samples} muestras, {len(seen_field)} campos no declarados ==\n")
+    print(f"\n== {samples} samples, {len(seen_field)} undeclared fields ==\n")
     for (schema, field), paths in sorted(seen_field.items()):
         ej = sorted(paths)[0]
-        print(f"  {schema:<24}.{field:<36} p.ej. {ej}")
+        print(f"  {schema:<24}.{field:<36} e.g. {ej}")
     return 0
 
 

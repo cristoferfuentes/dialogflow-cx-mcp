@@ -1,17 +1,16 @@
-"""Chrome REAL (no "Chrome for Testing" de Playwright, ni headless) controlado por CDP.
+"""The REAL Chrome (not Playwright's "Chrome for Testing", not headless) driven by CDP.
 
-Por que hace falta:
-* Playwright lanza `HeadlessChrome/156` -> Google RECHAZA el login de cuentas
+Why it is needed:
+* Playwright launches `HeadlessChrome/156` -> Google REJECTS the sign-in of accounts
   ("No puedes acceder: es posible que no sean seguros este navegador o la app"
   -> /v3/signin/rejected).
-* El proxy MITM termina el TLS con Python: el JA3/JA4 del cliente es el de
-  OpenSSL, no el de Chrome -> Google tambien lo puede marcar como raro.
-* Un Chrome de escritorio, con ventana y TLS propio, es lo que mas se parece a
-  un navegador real.
+* The MITM proxy terminates TLS with Python: the client's JA3/JA4 is
+  OpenSSL's, not Chrome's -> Google can also flag it as odd.
+* A desktop Chrome, with a window and its own TLS, is what most resembles
+  a real browser.
 
-El control es por **CDP** (`--remote-debugging-port`), que es lo que permite
-al MCP pilotarlo igual que lo pilota Playwright, pero sobre el navegador real.
-"""
+Control is via **CDP** (`--remote-debugging-port`), which is what lets
+the MCP drive it just as Playwright drives it, but on the real browser."""
 from __future__ import annotations
 
 import json
@@ -23,10 +22,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Binarios de Chrome, en orden de preferencia.
+# Chrome binaries, in order of preference.
 CHROME_CANDIDATES = [
-    # Google Chrome oficial primero (Chrome for Testing NO: Google avisa de
-    # que es para testing y puede tratarlo distinto en el login).
+    # Official Google Chrome first (Chrome for Testing NO: Google warns
+    # that it is for testing and may treat it differently at login).
     "/opt/google/chrome/chrome",
     "/opt/chrome-cft/chrome-linux64/chrome",
     "/usr/bin/google-chrome",
@@ -53,7 +52,7 @@ def port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> bool:
 
 
 class RealChrome:
-    """Chrome de escritorio con puerto CDP, en una pantalla virtual."""
+    """Desktop Chrome with port CDP, on a virtual display."""
 
     def __init__(
         self,
@@ -77,7 +76,7 @@ class RealChrome:
         self._ctx = None
         self.page = None
 
-    # ------------------------------------------------------------- ciclo
+    # ------------------------------------------------------------- cycle
     def launch(self, start_url: str = "about:blank") -> str:
         binary = find_chrome()
         if not binary:
@@ -98,17 +97,17 @@ class RealChrome:
             "--accept-lang=es-419,es;q=0.9",
             f"--window-size={self.window_size}",
             "--window-position=0,0",
-            # Sin --headless: el UA debe ser el de un Chrome de escritorio.
+            # Without UA: the UA must be that of a desktop Chrome.
             "--disable-features=Translate,TranslateUI,OptimizationHints",
-            # --test-type: Chrome no muestra el aviso de "unsupported
-            # command-line flag" (queda la pantalla limpia para el login).
+            # --test-type: Chrome does not show the "unsupported
+            # command-line flag" warning (the screen stays clean for login).
             "--test-type",
             *self.extra_args,
             start_url,
         ]
         if self.headless:
             base.insert(1, "--headless=new")
-        # Primero se intenta CON sandbox (Chrome se queja del flag --no-sandbox).
+        # First it tries WITH sandbox (Chrome complains about the --no-sandbox flag).
         for extra in ([], ["--no-sandbox", "--disable-dev-shm-usage"]):
             args = base[:1] + extra + base[1:]
             self.proc = subprocess.Popen(
@@ -123,7 +122,7 @@ class RealChrome:
                 if self.proc.poll() is not None:
                     break
                 time.sleep(0.4)
-            # No abrio el puerto: se reintenta con --no-sandbox.
+            # Did not open the port: retrying with --no-sandbox.
             try:
                 self.proc.terminate()
             except Exception:
@@ -132,7 +131,7 @@ class RealChrome:
         raise RuntimeError("Chrome no abrio el puerto CDP")
 
     def connect(self) -> Any:
-        """Se conecta por CDP y devuelve el contexto con la primera pestana."""
+        """Connects via CDP and returns the context with the first tab."""
         from playwright.sync_api import sync_playwright
 
         if self._pw is None:
@@ -173,7 +172,7 @@ class RealChrome:
             pass
         self._ctx = self._browser = self._pw = None
         self.page = None
-        # El proceso se queda (es el navegador del usuario); se cierra aparte.
+        # The process stays (it is the user's browser); it is closed separately.
         if self.proc and self.proc.poll() is None:
             try:
                 self.proc.terminate()
@@ -182,7 +181,7 @@ class RealChrome:
 
     # ------------------------------------------------------------- info
     def info(self) -> dict:
-        """UA, version y estado del CDP (util para diagnostico)."""
+        """UA, version and status of the CDP (useful for diagnostics)."""
         out: dict = {"binario": find_chrome(), "puerto": self.port, "pid": self.proc.pid if self.proc else None}
         try:
             req = subprocess.run(

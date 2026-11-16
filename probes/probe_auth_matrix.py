@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Matriz de autenticacion contra el backend INTERNO de la consola
-(dialogflow.clients6.google.com) hasta que una variante devuelva 200.
+"""Authentication matrix against the console's INTERNAL backend
+(dialogflow.clients6.google.com) until one variant returns 200.
 
-Solo peticiones de LECTURA (listar flows del clon).
+Only READ requests (listing the clone flows).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,12 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agente
-from cxp.httpclient import HttpStatusError, Session
 
-API_KEY = "AIzaSyD1dO8oRagJkmtkSJ9oLI289jIT8M4Zk5s"
+from cxp.config import load_config
+from cxp.httpclient import Session
+
+# The console API key is read from the environment (`CXP_API_KEY`); it is never hardwired.
+API_KEY = os.environ.get("CXP_API_KEY", "")
 ORIGIN = "https://conversational-agents.cloud.google.com"
 CLON = agente("por_defecto")
 def main() -> int:

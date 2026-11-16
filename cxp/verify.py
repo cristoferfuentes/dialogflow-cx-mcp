@@ -1,22 +1,20 @@
-"""Verificacion de RUNTIME: la unica forma de saber si la ruta llego al playbook.
+"""Verification of RUNTIME: the only way to know whether the route reached the playbook.
 
-El GET de la API no muestra el destino a playbook de una transition route (ni
-siquiera por el backend de la consola). La verdad esta en la **traza** de la
-conversacion:
+The GET of the API does not show the playbook target of a transition route (not
+even through the console backend). The truth is in the conversation **trace**:
 
     State Machine Update | CONVERSATION_EVENT : sys.no-match-default | page=...
     State Machine Update | TRANSITION : | page=transicion_canal | DEST=playbooks/...
     PLAYBOOK_INVOCATION | PB=pyb_...
 
-Procedimiento (ver 05-EJECUTAR-CONVERSACIONES.md del workspace):
+Procedure (see 05-RUN-CONVERSATIONS.md in the workspace):
 
-1. turno 0: `detectIntent` con el contexto en `queryParams.parameters`
-   (`canal`, `es_cliente`, ...) -> saludo.
-2. turno 1: `detectIntent` con una utterance que NO matchea -> se dispara
-   `sys.no-match-default` -> se entra a `transicion_canal` -> la ruta que
-   matchea por condicion deberia saltar al playbook.
-3. `GET /conversations/{id}` (el id de conversion es el id de sesion) -> traza.
-"""
+1. turn 0: `detectIntent` with the context in `queryParams.parameters`
+   (`canal`, `es_cliente`, ...) -> greeting.
+2. turn 1: `detectIntent` with an utterance that does NOT match -> `sys.no-match-default` fires
+   -> `transicion_canal` is entered -> the route that matches by condition should jump to the
+   playbook.
+3. `GET /conversations/{id}` (the conversion id is the session id) -> trace."""
 from __future__ import annotations
 
 import uuid
@@ -48,7 +46,9 @@ def run_turn(
 ) -> dict:
     body: dict = {
         "session": session_id,
-        "queryInput": {"text": {"text": text}},
+        # MEASURED (2026-11-13): the backend requires `queryInput.languageCode`;
+        # inside `queryInput.text` it is dropped and responds HTTP 400.
+        "queryInput": {"text": {"text": text}, "languageCode": "es"},
     }
     qp: dict = {}
     if parameters:
@@ -75,7 +75,7 @@ def verify_route_target(
     text_turn1: str = "xyzzy condicion imposible de fulfill 4711",
     timeout: float = 300.0,
 ) -> dict:
-    """Ejecuta 2 turnos y busca el DEST=playbooks/... en la traza."""
+    """Run 2 turns and look for DEST=playbooks/... in the trace."""
     session_id = str(uuid.uuid4())
     start_page = START_PAGE.format(
         p=api.cfg.project, l=api.cfg.location, a=agent_id

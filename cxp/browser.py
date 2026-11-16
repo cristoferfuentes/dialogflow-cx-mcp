@@ -1,16 +1,15 @@
-"""Navegador: perfil persistente + primer arranque con ventana (login) + headless.
+"""Browser: persistent profile + first launch with a window (login) + headless.
 
-Mecanismo de arranque automatico:
+Automatic launch mechanism:
 
-* La PRIMERA vez que se invoca el MCP, si no hay sesion de Google valida, se abre
-  un Chromium **con ventana** (headed) para que el usuario inicie sesion en su
-  cuenta. El perfil (cookies) queda persistido en `profile_dir`.
-* A partir de ahi, todas las invocaciones corren **headless** con ese perfil: no
-  aparece ninguna ventana y la latencia es la de una llamada HTTP.
+* The FIRST time the MCP is invoked, if there is no valid Google session, a
+  Chromium is opened **with a window** (headed) so the user can log in to their
+  account. The profile (cookies) is persisted in `profile_dir`.
+* From then on, all invocations run **headless** with that profile: no
+  window appears and the latency is that of a HTTP call.
 
-Ademas captura el trafico del navegador, para poder aprender (o replicar) la
-peticion exacta que hace la consola.
-"""
+It also captures the browser traffic, so it can learn (or replicate) the exact
+request the console makes."""
 from __future__ import annotations
 
 import json
@@ -23,7 +22,7 @@ from .auth import first_party_headers, pick_google_cookies, pick_sapisid
 from .config import Config
 from .mitm import MitmProxy
 
-# Hosts que el proxy local tiene que saber responder.
+# Hosts that the local proxy must know how to answer.
 MITM_HOSTS = [
     "conversational-agents.cloud.google.com",
     "accounts.google.com",
@@ -35,8 +34,8 @@ MITM_HOSTS = [
 ]
 
 
-# Hosts a los que se puede inyectar `Authorization: Bearer <token ADC>`
-# cuando el navegador NO tiene sesion de Google (primera parte / UDS).
+# Hosts into which `Authorization: Bearer <token ADC>` can be injected
+# when the browser has NO Google session (first part / UDS).
 BEARER_HOSTS = {
     "dialogflow.clients6.google.com",
     "conversational-agents.cloud.google.com",
@@ -53,7 +52,7 @@ class SessionState:
 
 
 class ConsoleBrowser:
-    """Perfil persistente de Chromium para la consola Conversational Agents."""
+    """Persistent Chromium profile for the Conversational Agents console."""
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -65,42 +64,41 @@ class ConsoleBrowser:
         self._record = False
         self._token: str | None = None
         self._token_ts: float = 0.0
-        # Flags extra de Chromium (p.ej. "--disable-quic"). Se anaden a los
-        # argumentos de arranque; util para diagnostico de red.
+        # Extra Chromium flags (e.g. "--disable-quic"). They are added to the
+        # startup arguments; useful for network diagnostics.
         self.extra_args: list[str] = []
-        # Si es False, el navegador NO usa el proxy MITM local (TLS nativo).
+        # If False, the browser does NOT use the local MITM proxy (native TLS).
         self.use_proxy = True
-        # Inyectar `Authorization: Bearer <token ADC>` en las peticiones del
-        # navegador. OJO: por defecto DESACTIVADO: al añadir una cabecera
-        # `Authorization` a un XHR cross-origin, el navegador dispara un
-        # preflight CORS y el proxy firma también el OPTIONS -> el navegador
-        # rechaza la respuesta y la consola se queda en blanco (medido).
-        # Para hablar con el backend sin sesion de Google, usar las llamadas
-        # desde Python (cxp/cxapi.py), que no tienen CORS.
+        # Inject `Authorization: Bearer <token ADC>` into browser requests. NOTE: by default DISABLED: when adding a
+        # `Authorization` header to a XHR cross-origin, the browser triggers a
+        # CORS preflight and the proxy also signs the OPTIONS -> the browser
+        # rejects the response and the console stays blank (measured).
+        # To talk to the backend without a Google session, use the calls
+        # from Python (cxp/cxapi.py), which have no CORS.
         self.inject_bearer = False
-        # Usar el `storage_state` (cookies) en vez del perfil persistente.
-        # Evita el lock del perfil si el login sigue abierto en otro navegador.
+        # Use the `storage_state` (cookies) instead of the persistent profile.
+        # Avoid the profile lock if the login is still open in another browser.
         self.use_state_file = False
-        # Usar el CHROME REAL (de escritorio) controlado por CDP en vez del
-        # Chromium de Playwright. Google rechaza el login en navegadores
-        # headless y el proxy MITM cambia el JA3 del TLS: con Chrome real
-        # (TLS nativo, con ventana) tanto el login como la consola funcionan.
+        # Use desktop CHROME REAL controlled by CDP instead of
+        # Playwright's Chromium. Google rejects login in headless browsers
+        # and the MITM proxy changes the TLS's JA3: with real Chrome
+        # (native TLS, with a window) both login and console work.
         self.use_real_chrome = True
         self._real = None
         self._browser = None
-        # User-Agent. Google RECHAZA el login de cuentas en navegadores
-        # headless ("No puedes acceder: es posible que no sean seguros este
-        # navegador o la app" -> /v3/signin/rejected) porque su UA dice
-        # "HeadlessChrome". Se presenta el UA de un Chrome de escritorio.
-        # (La sesion es la del propio usuario, en su propia maquina.)
+        # User-Agent. Google REJECTS account login in headless browsers
+        # ("No puedes acceder: es posible que no sean seguros este
+        # navegador o la app" -> /v3/signin/rejected) because its UA says
+        # "HeadlessChrome". A desktop Chrome UA is presented.
+        # (The session is the user's own, on their own machine.)
         self.user_agent = (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/156.0.0.0 Safari/537.36"
         )
 
-    # ------------------------------------------------------------------ ciclo
+    # ------------------------------------------------------------------ cycle
     def _bearer_token(self) -> str | None:
-        """Token OAuth de ADC (gcloud), cacheado ~50 min (caduca en 1 h)."""
+        """OAuth token for ADC (gcloud), cached ~50 min (expires in 1 h)."""
         if self._token and (time.time() - self._token_ts) < 3000:
             return self._token
         from .auth import gcloud_access_token
@@ -111,11 +109,10 @@ class ConsoleBrowser:
         return tok
 
     def _window_size(self) -> str:
-        """Tamano de la ventana = el de la pantalla virtual (Xvfb :99 = 1280x800).
+        """Window size = that of the virtual screen (Xvfb :99 = 1280x800).
 
-        Si la ventana es mas grande que la pantalla, el gestor de ventanas la
-        deja fuera de vista y el usuario no ve nada por noVNC.
-        """
+        If the window is larger than the screen, the window manager leaves it
+        out of view and the user sees nothing through noVNC."""
         try:
             import subprocess
 
@@ -129,15 +126,14 @@ class ConsoleBrowser:
         except Exception:
             return "1280,760"
 
-    # ------------------------------------------------------------------ ciclo
+    # ------------------------------------------------------------------ cycle
     def _launch_real_chrome(self, headless: bool):
-        """Usa el Chrome REAL (por CDP) en vez del Chromium de Playwright.
+        """Use Chrome REAL (via CDP) instead of Playwright's Chromium.
 
-        Google rechaza el login desde navegadores headless
-        (`/v3/signin/rejected`) y el proxy MITM cambia el JA3 del TLS. Con un
-        Chrome de escritorio (el de Google, instalado en `/opt/google/chrome`)
-        y TLS nativo, la sesion y la consola funcionan de verdad.
-        """
+        Google rejects login from headless browsers
+        (`/v3/signin/rejected`) and the MITM proxy changes the JA3 of the TLS. With a
+        desktop Chrome (Google's, installed at `/opt/google/chrome`)
+        and native TLS, the session and the console actually work."""
         from .chrome_cdp import RealChrome
 
         if self._real is None:
@@ -150,7 +146,7 @@ class ConsoleBrowser:
         try:
             page = self._real.connect()
         except Exception:
-            # No habia un Chrome escuchando: se lanza (con el perfil del paquete).
+            # There was no Chrome listening: it is launched (with the package profile).
             self._real.launch("about:blank")
             page = self._real.connect()
         self._ctx = page.context
@@ -164,20 +160,18 @@ class ConsoleBrowser:
     def _launch(self, headless: bool):
         from playwright.sync_api import sync_playwright
 
-        # La pantalla virtual debe existir ANTES de arrancar el driver de
-        # Playwright: el navegador es hijo del driver y hereda su entorno.
+        # The virtual display must exist BEFORE starting the Playwright driver: the browser is a child of the driver and inherits its environment.
         if self.cfg.display:
             os.environ["DISPLAY"] = self.cfg.display
 
-        # --- Chrome REAL (por CDP) ------------------------------------------
+        # --- Chrome REAL (by CDP) ------------------------------------------
         if self.use_real_chrome:
             return self._launch_real_chrome(headless)
 
         if self._pw is None:
             self._pw = sync_playwright().start()
-        # El navegador no puede hacer TLS saliente en esta maquina: se pone el
-        # proxy MITM local (ver cxp/mitm.py) para que el TLS con Google lo haga
-        # Python, que si funciona.
+        # The browser cannot make outbound TLS on this machine: the local MITM proxy is set up (see cxp/mitm.py) so that the TLS with Google is done by
+        # Python, which does work.
         if self.use_proxy and self._proxy is None:
             self._proxy = MitmProxy(
                 self.cfg.profile_dir.parent / ".proxy-cert",
@@ -207,22 +201,22 @@ class ConsoleBrowser:
             env=dict(os.environ),
         )
         if headless:
-            # En headless no hay ventana: el viewport define el tamano.
+            # In headless there is no window: the viewport defines the size.
             kwargs["viewport"] = {"width": 1280, "height": 900}
         else:
-            # Con ventana real, el viewport fijo pelea con --window-size y deja
-            # la ventana mas grande que la pantalla virtual (no se ve por noVNC).
+            # With a real window, the fixed viewport fights with --window-size and leaves
+            # the window larger than the virtual screen (not visible through noVNC).
             kwargs["no_viewport"] = True
         state = self.cfg.state_file
         use_state = bool(state.exists() and self.use_state_file)
         try:
-            # `channel="chromium"` usa el build completo de Chromium en modo
-            # headless nuevo: mucho mas estable con las sesiones de Google que
-            # el `chromium_headless_shell`.
+            # `channel="chromium"` uses the full Chromium build in new
+            # headless mode: much more stable with Google sessions than
+            # `chromium_headless_shell`.
             if use_state:
-                # Contexto TEMPORAL con las cookies del `storage_state`: no
-                # toca el perfil persistente, asi que no choca con el lock si
-                # el login sigue abierto en otro navegador.
+                # TEMPORARY context with the `storage_state` cookies: does not
+                # touch the persistent profile, so it does not clash with the lock if
+                # the login is still open in another browser.
                 browser = self._pw.chromium.launch(channel="chromium", headless=headless, args=args, env=dict(os.environ))
                 self._ctx = browser.new_context(
                     storage_state=str(state),
@@ -254,12 +248,11 @@ class ConsoleBrowser:
         return self._page
 
     def close(self):
-        """Cierra lo que el MCP ha abierto.
+        """Closes what MCP has opened.
 
-        Importante: en modo Chrome REAL el navegador es del USUARIO (es su
-        sesion de Google). NO se cierra: solo se suelta la conexion CDP, para
-        que el login siga vivo y el MCP pueda reconectarse.
-        """
+        Important: in Chrome REAL mode the browser belongs to USER (it is their
+        Google session). It is NOT closed: only the CDP connection is released, so
+        the login stays alive and MCP can reconnect."""
         try:
             if self._ctx and not self.use_real_chrome:
                 self._ctx.close()
@@ -284,7 +277,7 @@ class ConsoleBrowser:
                     pass
                 self._pw = None
             if self.use_real_chrome:
-                # El Chrome real sigue abierto: solo se suelta el driver.
+                # The real Chrome stays open: only the driver is released.
                 self._real = None
 
     def __enter__(self):
@@ -293,7 +286,7 @@ class ConsoleBrowser:
     def __exit__(self, *exc):
         self.close()
 
-    # ---------------------------------------------------------------- captura
+    # ---------------------------------------------------------------- capture
     def _on_request(self, request):
         if not self._record:
             return
@@ -337,9 +330,9 @@ class ConsoleBrowser:
         self._record = False
         return self.captured
 
-    # ---------------------------------------------------------------- sesion
+    # ---------------------------------------------------------------- session
     def _looks_logged_in(self) -> tuple[bool, str, str | None]:
-        """La señal real de sesion son las cookies de Google (no la URL)."""
+        """The real session signal is the Google cookies (not the URL)."""
         try:
             url = self._page.url
         except Exception:
@@ -383,14 +376,14 @@ class ConsoleBrowser:
         self._page.wait_for_timeout(wait_ms)
 
     def ensure_session(self, console_url: str, headed_timeout: int = 600) -> SessionState:
-        """Devuelve una sesion valida. Si no la hay, abre ventana para el login."""
+        """Returns a valid session. If none exists, opens a window for login."""
         self._launch(headless=True)
         self.open_console(console_url)
         ok, reason, email = self._looks_logged_in()
         if ok:
             return SessionState(True, email, reason)
 
-        # No hay sesion -> se abre la ventana para que el usuario entre a Google.
+        # No session -> the window opens so the user can sign in to Google.
         self.close()
         self._launch(headless=False)
         self.open_console(console_url)
@@ -398,7 +391,7 @@ class ConsoleBrowser:
         while time.time() < deadline:
             ok, reason, email = self._looks_logged_in()
             if ok:
-                # Guarda las cookies de forma explicita.
+                # Store cookies explicitly.
                 try:
                     self._ctx.storage_state(path=str(self.cfg.state_file))
                 except Exception:
@@ -418,7 +411,7 @@ class ConsoleBrowser:
             return []
 
     def auth_headers(self) -> dict[str, str]:
-        """Cabeceras de primera parte (UDS) equivalentes a las de la consola."""
+        """First-party headers (UDS) equivalent to those of the console."""
         cookies = self.cookies()
         sapisid = pick_sapisid(cookies)
         if not sapisid:
@@ -430,7 +423,7 @@ class ConsoleBrowser:
         return headers
 
     def fetch_in_page(self, method: str, url: str, payload: Any = None) -> tuple[int, str]:
-        """Hace la peticion DESDE la pagina: el navegador pone sus cookies y CORS."""
+        """Makes the FROM request to the page: the browser sends its cookies and CORS."""
         body = None
         if payload is not None:
             body = json.dumps(payload)

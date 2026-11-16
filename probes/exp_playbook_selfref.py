@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""EXPERIMENTO: ¿se puede crear en NUESTRA COPIA un playbook autorreferenciado
-(`${PLAYBOOK:si_mismo}`), que la API rechaza con "caused loop in playbook routes"?
+"""EXPERIMENT: can a self-referencing playbook be created in OUR COPY
+(`${PLAYBOOK:itself}`), which the API rejects with "caused loop in playbook routes"?
 
-Solo trabaja sobre nuestra copia (agente con permiso de escritura). Crea
-playbooks TEMPORALES y los borra SIEMPRE (finally). NO toca ningun playbook
-existente ni ningun otro agente.
+It only works on our own copy (the agent with write permission). It creates
+TEMPORARY playbooks and ALWAYS deletes them (finally). It does NOT touch any
+existing playbook nor any other agent.
 
-Variantes probadas:
-  V1  macro autorreferente en `steps`      -> se espera el error de bucle
-  V2  macro autorreferente en `guidelines` -> ESCAPE HATCH (no se escanea)
-  V3  PATCH de V2 moviendo la macro de guidelines a steps -> puerta de un solo sentido
+Variants tested:
+  V1  self-referencing macro in `steps`      -> the loop error is expected
+  V2  self-referencing macro in `guidelines` -> ESCAPE HATCH (it is not scanned)
+  V3  PATCH of V2 moving the macro from guidelines to steps -> one-way door
 
     .venv/bin/python probes/exp_playbook_selfref.py
 """
@@ -35,7 +35,7 @@ def main() -> int:
     base = f"{api._base('')}/agents/{agent}"
     creados: list[str] = []
     try:
-        # ---------------------------------------------- V1: macro en steps
+        # ---------------------------------------------- V1: macro in steps
         name1 = "zz_tmp_selfref_steps"
         body1 = {
             "displayName": name1,
@@ -43,18 +43,18 @@ def main() -> int:
             "instruction": {"guidelines": "",
                             "steps": [{"text": f"Delega en ${{PLAYBOOK:{name1}}}"}]},
         }
-        print("=== V1: macro autorreferente en `steps` ===")
+        print("=== V1: self-referencing macro in `steps` ===")
         try:
             pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                              body=body1, timeout=120.0)
             pid = pb["name"].split("/")[-1]
             creados.append(pid)
-            print(f"   CREADO (inesperado): {pid}")
+            print(f"   CREATED (unexpected): {pid}")
             print("   referencedPlaybooks:", pb.get("referencedPlaybooks"))
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
 
-        # ------------------------------------------ V2: macro en guidelines
+        # ------------------------------------------ V2: macro in guidelines
         name2 = "zz_tmp_selfref_guidelines"
         body2 = {
             "displayName": name2,
@@ -62,22 +62,22 @@ def main() -> int:
             "instruction": {"guidelines": f"Delega en ${{PLAYBOOK:{name2}}}",
                             "steps": [{"text": "Paso limpio sin macros."}]},
         }
-        print("\n=== V2: macro autorreferente en `guidelines` ===")
+        print("\n=== V2: self-referencing macro in `guidelines` ===")
         pid2 = None
         try:
             pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                              body=body2, timeout=120.0)
             pid2 = pb["name"].split("/")[-1]
             creados.append(pid2)
-            print(f"   CREADO: {pid2}  ({pb.get('displayName')})")
-            print(f"   referencedPlaybooks: {pb.get('referencedPlaybooks')}  <-- arista registrada?")
+            print(f"   CREATED: {pid2}  ({pb.get('displayName')})")
+            print(f"   referencedPlaybooks: {pb.get('referencedPlaybooks')}  <-- edge registered?")
             print(f"   instruction.guidelines: {(pb.get('instruction') or {}).get('guidelines')!r}")
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
 
-        # ------------------------- V3: PATCH moviendo la macro a steps
+        # ------------------------- V3: PATCH moving the macro to steps
         if pid2:
-            print("\n=== V3: PATCH moviendo la macro de guidelines a steps ===")
+            print("\n=== V3: PATCH moving the macro from guidelines to steps ===")
             fresh = api.request("GET", api._url(f"{base}/playbooks/{pid2}"))
             instr = dict(fresh.get("instruction") or {})
             instr["guidelines"] = ""
@@ -90,12 +90,12 @@ def main() -> int:
                 api.request("PATCH", api._url(f"{base}/playbooks/{pid2}", alt="json"),
                             body=patch_body,
                             query={"updateMask": "instruction"}, timeout=120.0)
-                print("   PATCH ACEPTADO (inesperado)")
+                print("   PATCH ACCEPTED (unexpected)")
             except HttpStatusError as e:
                 print(f"   HTTP {e.status}: {e.body[:300]}")
 
-            # V4: renombrar para que la macro (en guidelines) apunte a si mismo
-            print("\n=== V4: el playbook ya se llama como su macro: ¿cambia algo? ===")
+            # V4: rename so that the macro (in guidelines) points to itself
+            print("\n=== V4: the playbook is already named like its macro: does anything change? ===")
             after = api.request("GET", api._url(f"{base}/playbooks/{pid2}"))
             print("   guidelines:", repr((after.get("instruction") or {}).get("guidelines")))
             print("   referencedPlaybooks:", after.get("referencedPlaybooks"))
@@ -103,17 +103,17 @@ def main() -> int:
                                           ensure_ascii=False)[:200])
 
     finally:
-        print("\n=== limpieza ===")
+        print("\n=== cleanup ===")
         for pid in creados:
             try:
                 api.request("DELETE", api._url(f"{base}/playbooks/{pid}", alt="json",
                                               force="true"))
-                print(f"   playbook {pid} borrado")
+                print(f"   playbook {pid} deleted")
             except HttpStatusError as e:
-                print(f"   !! no se pudo borrar {pid}: HTTP {e.status} {e.body[:160]}")
+                print(f"   !! could not delete {pid}: HTTP {e.status} {e.body[:160]}")
         vivos = [p for p in api.list_playbooks(agent)
                  if (p.get("displayName") or "").startswith("zz_tmp_")]
-        print("   playbooks zz_tmp_ restantes:", len(vivos))
+        print("   zz_tmp_ playbooks left:", len(vivos))
     return 0
 
 

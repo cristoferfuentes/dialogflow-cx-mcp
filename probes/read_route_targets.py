@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Lee los destinos (playbook) de las transition routes de una pagina, en la
-consola "Conversational Agents" (Chrome real por CDP).
+"""Reads the targets (playbook) of the transition routes of a page, in the
+"Conversational Agents" console (real Chrome via CDP).
 
-NO escribe nada: solo abre el editor de cada ruta y lee el valor del selector
-"Transition". En el agente ORIGINAL es de solo lectura por diseño.
+It writes NOTHING: it only opens the editor of each route and reads the value of
+the "Transition" selector. On the ORIGINAL agent it is read-only by design.
 
-Uso:
+Usage:
   .venv/bin/python read_route_targets.py --agent original [--out /tmp/mapa.json]
 """
 from __future__ import annotations
@@ -18,10 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 
@@ -33,7 +33,7 @@ FRAME_URL = (
 JS_LEER = """
 () => {
   const target = document.querySelector('df-transition-target');
-  if (!target) return {error: 'sin df-transition-target (editor no abierto)'};
+  if (!target) return {error: 'no df-transition-target (editor not open)'};
   const radio = target.querySelector('mat-radio-button.mat-mdc-radio-checked');
   const tipo = radio ? radio.getAttribute('value') : null;
   const sel = target.querySelector('span.mat-mdc-select-min-line');
@@ -63,19 +63,19 @@ def main() -> int:
     page.goto(url, wait_until="domcontentloaded", timeout=90_000)
     time.sleep(9)
 
-    # Expandir la lista completa de rutas ("View all (N)").
+    # Expand the full route list ("View all (N)").
     try:
         ver = page.get_by_text("View all (", exact=False).first
         if ver.count() > 0 and ver.is_visible():
             ver.click()
-            print("== lista de rutas expandida", flush=True)
+            print("== route list expanded", flush=True)
             time.sleep(2)
     except Exception as exc:
-        print(f"== aviso: no se pudo expandir la lista ({exc})", flush=True)
+        print(f"== warning: the list could not be expanded ({exc})", flush=True)
 
     cards = page.locator("transition_routes df-node-card .node-card-button")
     n = cards.count()
-    print(f"== rutas visibles en la lista: {n}", flush=True)
+    print(f"== routes visible in the list: {n}", flush=True)
 
     out: list[dict] = []
     for i in range(n):
@@ -93,10 +93,10 @@ def main() -> int:
         out.append({"indice": i, "condicion": cond, **data})
         print(f"   [{i}] {cond[:60]:62s} -> {data.get('tipo')} / {data.get('destino')}", flush=True)
 
-    print(f"\n== {len(out)} rutas leidas", flush=True)
+    print(f"\n== {len(out)} routes read", flush=True)
     if args.out:
         Path(args.out).write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
-        print(f"== escrito {args.out}", flush=True)
+        print(f"== written {args.out}", flush=True)
     return 0
 
 

@@ -1,18 +1,17 @@
-"""Escritura GENERICA de un campo que la API publica no declara.
+"""Write GENERIC of a field that the public API does not declare.
 
-La idea: no hay un metodo por recurso ni un metodo por hueco. Hay UNA
-operacion:
+The idea: there is no per-resource method and no per-gap method. There is ONE
+operation:
 
-    GET  recurso (por su `name`)
-    -> se aplica el valor en la ruta pedida (`a.b[0].c`)
-    -> se PATCHea el recurso con la mascara minima (la clave de primer nivel)
-    -> se relee y se COMPARA
+    GET  resource (by its `name`)
+    -> the value is applied on the requested route (`a.b[0].c`)
+    -> the resource is PATCHed with the minimal mask (the top-level key)
+    -> it is re-read and COMPARES
 
-La comparacion final es lo que da la garantia: el servidor puede **descartar**
-un campo en silencio (es lo que hace la API publica; el backend de la consola
-tambien lo hace con algunos campos). Por eso la respuesta dice que cambio de
-verdad y que se perdio.
-"""
+The final comparison is what gives the guarantee: the server can **drop**
+a field silently (that is what the public API does; the console
+backend also does it with some fields). That is why the response says what actually
+changed and what was lost."""
 from __future__ import annotations
 
 import copy
@@ -32,7 +31,7 @@ def _recortar(valor: Any, limite: int = 300) -> Any:
 
 
 def diff_json(antes: Any, despues: Any, prefijo: str = "") -> list[dict[str, Any]]:
-    """Diferencias entre dos estructuras, en forma `{ruta, antes, despues}`."""
+    """Differences between two structures, in `{ruta, antes, despues}` form."""
     cambios: list[dict[str, Any]] = []
     if isinstance(antes, dict) and isinstance(despues, dict):
         for clave in sorted(set(antes) | set(despues)):
@@ -100,14 +99,13 @@ def set_field(api, resource_name: str, path: str, value: Any, *,
               dry_run: bool = True, project: str = "",
               language_code: str | None = None,
               campos_extra: tuple[str, ...] = ()) -> Resultado:
-    """Escribe `value` en `path` del recurso `resource_name`.
+    """Write `value` to `path` of resource `resource_name`.
 
-    `resource_name` es el `name` completo que devuelve la API
-    (`projects/p/locations/l/agents/a/flows/f/pages/p`), asi que funciona con
-    CUALQUIER recurso del agente sin escribir un metodo por tipo.
+    `resource_name` is the complete `name` returned by the API
+    (`projects/p/locations/l/agents/a/flows/f/pages/p`), so it works with
+    ANY agent resource without writing a method per type.
 
-    `path` es una ruta con indices: `transitionRoutes[0].targetPlaybook`.
-    """
+    `path` is a route with indices: `transitionRoutes[0].targetPlaybook`."""
     res = Resultado(recurso=resource_name, campo=path, valor=value)
     try:
         antes = api.request("GET", api._url("/" + resource_name))
@@ -119,7 +117,7 @@ def set_field(api, resource_name: str, path: str, value: Any, *,
     res.antes = valor_antes
 
     if dry_run:
-        # Se muestra lo que PASARIA, sin escribir.
+        # Shows what WOULD PASS, without writing.
         simulado = copy.deepcopy(antes)
         try:
             apply_path(simulado, path, value)
@@ -157,7 +155,7 @@ def set_field(api, resource_name: str, path: str, value: Any, *,
     res.despues = read_path(despues, path)
     res.verificado = res.despues == value
     res.cambios = diff_json(antes, despues)
-    # Lo que se pidio escribir y el servidor NO guardo.
+    # What was asked to be written and the server did NOT save.
     perdidas = []
     if not res.verificado:
         perdidas.append(path)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Explora la consola en el Chrome real: captura, selectores y trafico.
+"""Explores the console in the real Chrome: capture, selectors and traffic.
 
-Uso: .venv/bin/python explore_console.py [--url URL] [--shot /tmp/x.png]
+Usage: .venv/bin/python explore_console.py [--url URL] [--shot /tmp/x.png]
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def main() -> int:
     br._launch(headless=False)
     page = br._page
 
-    # Grabar el trafico (el manejador se engancha al contexto real).
+    # Record the traffic (the handler is hooked to the real context).
     br.start_recording()
     br._ctx.on("request", br._on_request)
     br._ctx.on("response", br._on_response)
@@ -44,7 +44,7 @@ def main() -> int:
     try:
         page.screenshot(path=args.shot, full_page=False)
     except Exception as exc:
-        print(f"== sin captura: {exc}")
+        print(f"== no screenshot: {exc}")
 
     data = {
         "url": page.url,
@@ -62,14 +62,14 @@ def main() -> int:
     }
     Path(args.out).write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"== url: {data['url']}")
-    print(f"== titulo: {data['titulo']}")
-    print(f"== peticiones: {len(data['peticiones'])}")
+    print(f"== title: {data['titulo']}")
+    print(f"== requests: {len(data['peticiones'])}")
     for p in data["peticiones"]:
         print(f"   {p.get('status')} {p['method']} {p['url'][:140]}  (post {p['post_len']} B)")
-    print(f"== selectores: {data['selectores'].get('n')}")
+    print(f"== selectors: {data['selectores'].get('n')}")
     for e in data["selectores"].get("elementos", []):
         print(f"   <{e['tag']}> role={e['role']!r} cls={e['cls'][:40]!r} :: {e['texto'][:70]!r}")
-    print(f"== escrito en {args.out}")
+    print(f"== written in {args.out}")
     return 0
 
 

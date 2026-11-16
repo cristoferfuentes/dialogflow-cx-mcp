@@ -1,17 +1,17 @@
-"""Helpers puros sobre las transition routes (sin red, sin navegador)."""
+"""Pure helpers over the transition routes (no network, no browser)."""
 from __future__ import annotations
 
 TARGET_KEYS = ("targetPage", "targetFlow", "targetPlaybook")
 
 
 def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
-    """Ubica la ruta por `name` (uuid), por condicion exacta o por indice."""
+    """Locate the route by `name` (uuid), by exact condition, or by index."""
     if isinstance(ref, int):
         if not 0 <= ref < len(routes):
-            raise LookupError(f"indice de ruta fuera de rango: {ref} (hay {len(routes)})")
+            raise LookupError(f"route index out of range:{ref} (there are {len(routes)})")
         return ref, routes[ref]
     if ref is None or ref == "":
-        raise LookupError("falta la referencia de la ruta")
+        raise LookupError("the route reference is missing")
     for i, r in enumerate(routes):
         if r.get("name") == ref or (r.get("name") or "").split("/")[-1] == ref:
             return i, r
@@ -22,22 +22,21 @@ def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
     if len(hits) == 1:
         return hits[0], routes[hits[0]]
     raise LookupError(
-        f"ruta no encontrada: {ref!r} (coincidencias parciales: {hits})"
+        f"route not found:{ref!r} (partial matches: {hits})"
     )
 
 
 def summarize(routes: list[dict], playbooks: dict[str, str] | None = None) -> list[dict]:
-    """Vista compacta: condicion, tipo de destino y nombre legible del destino.
+    """Compact view: condition, target type and human-readable target name.
 
-    `playbooks`: mapa **id -> displayName** de los playbooks del agente (el
-    que devuelve `ConsoleApi.playbook_index()[1]`). Si el destino de la ruta
-    es un playbook, se muestra su nombre legible; si es una pagina o un flow,
-    se muestra su id (esa parte la resuelve el llamante).
-    """
+    `playbooks`: **id -> displayName** map of the agent's playbooks (the
+    one returned by `ConsoleApi.playbook_index()[1]`). If the route target
+    is a playbook, its human-readable name is shown; if it is a page or a flow,
+    its id is shown (the caller resolves that part)."""
     inv = dict(playbooks or {})
     rows = []
     for r in routes:
-        kind, target = "SIN DESTINO", None
+        kind, target = "NO TARGET", None
         for key in TARGET_KEYS:
             if r.get(key):
                 target = str(r[key]).split("/")[-1]

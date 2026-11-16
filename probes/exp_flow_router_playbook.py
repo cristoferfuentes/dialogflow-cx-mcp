@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
-"""EXPERIMENTO SEGURO: ¿el backend interno (primera parte) PERSISTE
-`targetPlaybook` en una transition route de NIVEL FLOW (el "router" de un flow)?
+"""SAFE EXPERIMENT: does the internal backend (first party) PERSIST
+`targetPlaybook` in a FLOW-LEVEL transition route (the "router" of a flow)?
 
-REGLA DURA (2026-11-08): **nunca se edita un playbook que no sea nuestra copia
-del agente**. Este script, por tanto:
+HARD RULE (2026-11-08): **never edit a playbook that is not our own copy
+of the agent**. This script, therefore:
 
-  * solo trabaja sobre el agente de `CXP_AGENT_READWRITE` (nuestra copia);
-  * NO crea, NO edita y NO borra ningun playbook;
-  * crea un FLOW TEMPORAL, lo borra SIEMPRE (finally) y no toca ningun flow
-    existente.
+  * only works on the agent of `CXP_AGENT_READWRITE` (our copy);
+  * does NOT create, does NOT edit and does NOT delete any playbook;
+  * creates a TEMPORARY FLOW, deletes it ALWAYS (finally) and does not touch any
+    existing flow.
 
-Procedimiento:
-  1. crea un flow temporal en nuestra copia
-  2. le pone una transition route con destino a un playbook NUESTRO
-  3. verifica por GET que el `targetPlaybook` persistio
-  4. borra el flow temporal (finally) y comprueba que ya no existe
+Procedure:
+  1. creates a temporary flow in our copy
+  2. gives it a transition route targeting one of OUR playbooks
+  3. verifies via GET that the `targetPlaybook` persisted
+  4. deletes the temporary flow (finally) and checks that it is gone
 
     .venv/bin/python probes/exp_flow_router_playbook.py
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -37,9 +36,9 @@ TMP_FLOW = "zz_tmp_probe_router_playbook"
 def main() -> int:
     cfg = load_config()
     agent_id = cfg.default_agent
-    # REGLA DURA: este script solo puede tocar nuestra copia.
+    # HARD RULE: this script can only touch our own copy.
     assert_writable(cfg.project, agent_id, cfg)
-    print(f"agente de trabajo: {agent_id} (nuestra copia, con permiso de escritura)")
+    print(f"working agent: {agent_id} (our copy, with write permission)")
 
     api = ConsoleApi(cfg)
     base = f"{api._base('')}/agents/{agent_id}"
@@ -47,21 +46,21 @@ def main() -> int:
     try:
         pbs = api.list_playbooks(agent_id)
         if not pbs:
-            print("ABORTO: nuestra copia no tiene playbooks")
+            print("ABORT: our copy has no playbooks")
             return 1
         pb = pbs[0]
         pb_ref = f"projects/{cfg.project}/locations/{cfg.location}/agents/{agent_id}" \
                  f"/playbooks/{pb['name'].split('/')[-1]}"
-        print(f"playbook destino (NUESTRO, no se modifica): {pb.get('displayName')}")
+        print(f"target playbook (OURS, not modified): {pb.get('displayName')}")
 
-        # ------------------------------------------------ flow temporal
+        # ------------------------------------------------ temporary flow
         created = api.request("POST", api._url(f"{base}/flows", alt="json"),
                               body={"displayName": TMP_FLOW,
                                     "description": "temporal - probe"})
         flow_id = created["name"].split("/")[-1]
-        print(f"flow temporal creado: {flow_id}")
+        print(f"temporary flow created: {flow_id}")
 
-        # ------------------------------------- PATCH con targetPlaybook
+        # ------------------------------------- PATCH with targetPlaybook
         flow_body = {
             "name": created["name"],
             "displayName": created.get("displayName"),
@@ -91,12 +90,12 @@ def main() -> int:
         if flow_id:
             try:
                 api.request("DELETE", api._url(f"{base}/flows/{flow_id}", alt="json"))
-                print(f"\nflow temporal BORRADO: {flow_id}")
+                print(f"\ntemporary flow DELETED: {flow_id}")
                 vivos = [f for f in api.list_flows(agent_id)
                          if f["name"].split("/")[-1] == flow_id]
-                print("   sigue en el agente?", bool(vivos))
+                print("   still in the agent?", bool(vivos))
             except HttpStatusError as e:
-                print(f"\n!! NO SE PUDO BORRAR el flow {flow_id}: HTTP {e.status}")
+                print(f"\n!! COULD NOT DELETE the flow {flow_id}: HTTP {e.status}")
 
 
 if __name__ == "__main__":

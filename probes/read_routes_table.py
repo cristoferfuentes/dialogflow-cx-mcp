@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Lee la TABLA "Routes" del panel lateral de la consola: por cada transition
-route da la condicion y su TRANSICION (playbook destino).
+"""Reads the "Routes" TABLE of the console side panel: for each transition
+route it gives the condition and its TRANSITION (target playbook).
 
-Es la via de solo lectura para recuperar el mapa ruta -> playbook.
+It is the read-only way to recover the route -> playbook map.
 
-Uso:
+Usage:
   .venv/bin/python read_routes_table.py --agent original [--out /tmp/mapa.json]
 """
 from __future__ import annotations
@@ -17,10 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda
+
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda
 
 AGENTS = agentes_de_sonda()
 FRAME_URL = (
@@ -36,7 +36,7 @@ JS_NODES = """
 })
 """
 
-# Lee las filas de la tabla del panel "Routes": celdas -> texto
+# Reads the rows of the "Routes" panel table: cells -> text
 JS_ROWS = """
 () => {
   const rows = [...document.querySelectorAll('tr, [role="row"]')];
@@ -75,30 +75,30 @@ def main() -> int:
         page.mouse.click(objetivo["x"], objetivo["y"])
         time.sleep(4)
     else:
-        print(f"== no se encontro el nodo {args.page_node!r}; nodos={[n['t'] for n in nodes]}")
+        print(f"== the node {args.page_node!r} was not found; nodes={[n['t'] for n in nodes]}")
 
     filas = page.evaluate(JS_ROWS)
-    print(f"== filas de la tabla: {len(filas)}")
+    print(f"== table rows: {len(filas)}")
     for i, celdas in enumerate(filas):
         print(f"  [{i}] " + " | ".join(c[:60] for c in celdas))
 
-    # Version "plana": condicion -> transicion
+    # "Flat" version: condition -> transition
     mapa = []
     for celdas in filas:
         if len(celdas) < 4:
             continue
-        intent, cond, fulfill, trans = celdas[0], celdas[1], celdas[2], celdas[3]
+        intent, cond, _fulfill, trans = celdas[0], celdas[1], celdas[2], celdas[3]
         if not cond or cond.lower() in ("condition",):
             continue
         mapa.append({"condicion": cond, "transicion": trans, "intent": intent})
 
-    print(f"\n== mapa ({len(mapa)} rutas)")
+    print(f"\n== map ({len(mapa)} routes)")
     for m in mapa:
         print(f"   {m['condicion'][:70]:72s} -> {m['transicion']}")
 
     if args.out:
         Path(args.out).write_text(json.dumps(mapa, indent=1, ensure_ascii=False), encoding="utf-8")
-        print(f"== escrito {args.out}")
+        print(f"== written {args.out}")
     return 0
 
 

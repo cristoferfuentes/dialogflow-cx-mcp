@@ -1,74 +1,73 @@
-"""REGLAS DE NEGOCIO de la CREACION de playbooks en Dialogflow CX (medidas).
+"""RULES OF BUSINESS of the CREATION of playbooks in Dialogflow CX (measured).
 
-Este modulo es la parte **offline** (sin red) de la creacion de playbooks: arma
-el cuerpo del POST, escanea las macros del texto y decide que hacer con la
-autorreferencia. Todo lo que hay aqui esta MEDIDO (ver `cxp/limits.py` y las
-lecciones `2026-11-04d/e/g` y `2026-11-08` de AGENTS.md); nada se deduce del
-descriptor oficial, que en este punto miente por omision.
+This module is the **offline** part (no network) of playbook creation: it builds
+the POST body, scans the text macros and decides what to do with
+self-reference. Everything here is MEASURED (see `cxp/limits.py` and
+lessons `2026-11-04d/e/g` and `2026-11-08` of AGENTS.md); nothing is inferred from the
+official discovery doc, which at this point lies by omission.
 
-LAS REGLAS (y su sintoma exacto)
+THE RULES (and their exact symptom)
 --------------------------------
 
-R1  `displayName` y `goal` son obligatorios. Sin `goal` la API responde
-    *"Playbook goal cannot be empty"*. El backend **revalida el playbook
-    entero** en cada escritura: hay que mandar el cuerpo completo.
+R1  `displayName` and `goal` are mandatory. Without `goal` the API responds
+    *"Playbook goal cannot be empty"*. The backend **revalidates the whole
+    playbook** on every write: you have to send the complete body.
 
-R2  El backend escanea las macros del texto **solo en `goal` y en
-    `instruction.steps`** (medido: macro en `goal` -> HTTP 400
-    *"Referenced resource X does not exist under <agente>"*).
-    **`instruction.guidelines` NO se escanea** (medido): es el unico sitio
-    donde puede vivir una macro autorreferente.
+R2  The backend scans the text macros **only in `goal` and in
+    `instruction.steps`** (measured: a macro in `goal` -> HTTP 400
+    *"Referenced resource X does not exist under <agent>"*).
+    **`instruction.guidelines` is NOT scanned** (measured): it is the only
+    place where a self-referencing macro can live.
 
-R3  `${TOOL:x}` **exige** `referencedTools` explicito en el cuerpo. Sin el
-    binding: *"Tool X used in goal or steps are not listed in the referenced
-    tools."*. Los ids van como nombre completo de recurso:
+R3  `${TOOL:x}` **requires** an explicit `referencedTools` in the body.
+    Without the binding: *"Tool X used in goal or steps are not listed in the referenced
+    tools."*. The ids go as full resource name:
     `projects/{p}/locations/{l}/agents/{a}/tools/{id}`.
 
-R4  `${FLOW:x}` y `${PLAYBOOK:x}` los **deriva** el backend: `referencedFlows`
-    y `referencedPlaybooks` son `readOnly: true` en el descriptor -> mandarlos
-    no guarda nada. No mandarlos.
+R4  `${FLOW:x}` and `${PLAYBOOK:x}` are **derived** by the backend: `referencedFlows`
+    and `referencedPlaybooks` are `readOnly: true` in the discovery doc -> sending them
+    saves nothing. Do not send them.
 
-R5  La macro se resuelve **por displayName** y el destino tiene que existir ya
-    *under the agent* -> los playbooks se crean en **orden topologico** (primero
-    los que otros referencian).
+R5  The macro is resolved **by displayName** and the target must already exist
+    *under the agent* -> playbooks are created in **topological order** (first
+    the ones others reference).
 
-R6  La **autorreferencia** (`${PLAYBOOK:<si mismo>}`) es IMPOSIBLE por API:
-    la comprobacion de bucles se ejecuta SIEMPRE, incluso con la mascara de
-    campo hoja `updateMask=instruction.steps` (medido: HTTP 400 *"Playbook X
-    caused loop in playbook routes."*). Politicas de esquivo:
-      * `guidelines` -> la macro se mueve a `instruction.guidelines` (unico
-        campo no escaneado): el texto se conserva VERBATIM, pero la macro deja
-        de estar en `steps` (su posicion funcional) y no se registra la
-        auto-arista en `referencedPlaybooks` (readOnly).
-      * `inert` -> la macro se neutraliza en su sitio (`${PLAYBOOK:x}` ->
-        `{{PLAYBOOK:x}}`): conserva la posicion, pierde la expansion.
-      * `error` -> no se crea y se explican las dos opciones.
+R6  **Self-reference** (`${PLAYBOOK:<itself>}`) is IMPOSSIBLE by API:
+    the loop check runs ALWAYS, even with the leaf field mask
+    `updateMask=instruction.steps` (measured: HTTP 400 *"Playbook X
+    caused loop in playbook routes."*). Workaround policies:
+      * `guidelines` -> the macro moves to `instruction.guidelines` (only
+        field not scanned): the text is preserved VERBATIM, but the macro stops
+        being in `steps` (its functional position) and the
+        auto-arista is not recorded in `referencedPlaybooks` (readOnly).
+      * `inert` -> the macro is neutralized in place (`${PLAYBOOK:x}` ->
+        `{{PLAYBOOK:x}}`): keeps the position, loses the expansion.
+      * `error` -> not created and both options are explained.
 
-R7  **`playbooks:import` NUNCA.** Crea un recurso fantasma sin id
-    (`name = ".../playbooks/"`) que el runtime resuelve por prefijo y rompe
-    TODAS las invocaciones de playbook del agente:
+R7  **`playbooks:import` NEVER.** Creates a ghost resource without id
+    (`name = ".../playbooks/"`) that the runtime resolves by prefix and breaks
+    ALL the playbook invocations of the agent:
     *"Playbook '' (ID: ) is missing a goal"*.
 
-R8  **POST != PATCH.** Al crear (POST) las macros validan bien si el recurso
-    ya existe. Al actualizar (PATCH) el backend revalida el playbook entero
-    cuando la mascara toca un campo de nivel superior (`goal`, `instruction`) y
-    falla con *"Flow X does not exist under the agent"* (bug de CX, los flows
-    SI existen). Con mascara de **campo hoja** (`instruction.steps`,
-    `instruction.guidelines`) no revalida las referencias -> PATCH limpio, en
-    sitio y conservando el id.
+R8  **POST != PATCH.** When creating (POST) the macros validate well if the resource
+    already exists. When updating (PATCH) the backend revalidates the whole playbook
+    when the mask touches a top level field (`goal`, `instruction`) and
+    fails with *"Flow X does not exist under the agent"* (CX bug, the flows
+    DO exist). With a **leaf field** mask (`instruction.steps`,
+    `instruction.guidelines`) it does not revalidate references -> PATCH clean, in
+    place and keeping the id.
 
-R9  **PATCH sin mascara = los campos omitidos se BORRAN** (medido): se van
-    `codeBlock`, `llmModelSettings` e `inlineActions`. Nunca sin mascara.
+R9  **PATCH without mask = omitted fields are DELETE** (measured): `codeBlock`,
+    `llmModelSettings` and `inlineActions` are dropped. Never without mask.
 
-R10 `playbookType` es escribible (`TASK` | `ROUTINE`). Un macro
-    `${PLAYBOOK:X}` que apunte a un playbook de tipo ROUTINE hace fallar el
-    POST: *"X is a workflow playbook, which is not supported for task
+R10 `playbookType` is writable (`TASK` | `ROUTINE`). A macro
+    `${PLAYBOOK:X}` pointing to a ROUTINE-type playbook makes the
+    POST fail: *"X is a workflow playbook, which is not supported for task
     playbooks."*
 
-Campos que NO se escriben nunca (son `readOnly` o los deriva el backend):
+Fields that are NEVER written (they are `readOnly` or derived by the backend):
 `name`, `createTime`, `updateTime`, `tokenCount`, `inlineActions`,
-`referencedFlows`, `referencedPlaybooks`.
-"""
+`referencedFlows`, `referencedPlaybooks`."""
 from __future__ import annotations
 
 import re
@@ -76,39 +75,38 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-# Macro de recurso: ${PLAYBOOK:nombre} | ${FLOW:nombre} | ${TOOL:nombre}
+# Resource macro: ${PLAYBOOK:nombre} | ${FLOW:nombre} | ${TOOL:nombre}
 MACRO_RE = re.compile(r"\$\{(PLAYBOOK|FLOW|TOOL):([^{}]+)\}")
 
-# Campos del cuerpo que el backend ESCANEA (medido).
+# Body fields that the backend SCANS (measured).
 CAMPOS_ESCANEADOS = ("goal", "steps")
-# Campos que el backend NO escanea (medido): el escape hatch.
+# Fields the backend does NOT scan (measured): the escape hatch.
 CAMPOS_NO_ESCANEADOS = ("guidelines",)
-# Campo de estado desconocido: se escanea por prudencia.
+# Unknown status field: scanned as a precaution.
 CAMPOS_NO_MEDIDOS = ("codeBlock",)
 
-# Politicas para la autorreferencia.
+# Policies for self-reference.
 POLITICAS_AUTOREF = ("error", "guidelines", "inert")
 
 
 class ReglaNegocioError(ValueError):
-    """La peticion no cumple una regla de negocio de CX.
+    """The request does not satisfy a CX business rule.
 
-    El mensaje es el que devolveria la API (o su causa), para que el agente
-    que lo lee sepa que hacer sin tener que gastar una escritura en descubrirlo.
-    """
+    The message is what the API would return (or its cause), so that the agent
+    reading it knows what to do without spending a write to find out."""
 
 
 @dataclass(frozen=True)
 class Macro:
-    """Una macro de recurso encontrada en el texto de un playbook."""
+    """A resource macro found in the text of a playbook."""
 
     kind: str      # PLAYBOOK | FLOW | TOOL
-    ref: str       # displayName (o id) referenciado
+    ref: str       # displayName (or id) referenced
     campo: str     # goal | steps | guidelines | codeBlock
 
     @property
     def escaneada(self) -> bool:
-        """El backend la valida al escribir?"""
+        """Does the backend validate it on write?"""
         return self.campo in CAMPOS_ESCANEADOS or self.campo in CAMPOS_NO_MEDIDOS
 
     @property
@@ -124,12 +122,11 @@ def _macros_en_texto(texto: str, campo: str) -> list[Macro]:
 
 def escanear_macros(goal: str = "", guidelines: str = "", steps: Iterable[Any] | None = None,
                      code_block: Any = "") -> list[Macro]:
-    """Todas las macros del playbook, con el campo donde esta cada una.
+    """All playbook macros, with the field where each one is.
 
-    Se escanean los tres campos (los escaneados, el que no y el no medido)
-    porque el informe tiene que ser COMPLETO: aunque `guidelines` no lo
-    valide el backend, quien llama tiene que saber que hay una macro ahi.
-    """
+    All three fields are scanned (the scanned ones, the one that is not and the unmeasured one)
+    because the report has to be COMPLETE: even if `guidelines` does not
+    validate it in the backend, the caller has to know there is a macro there."""
     out: list[Macro] = []
     out += _macros_en_texto(goal or "", "goal")
     out += _macros_en_texto(guidelines or "", "guidelines")
@@ -148,16 +145,16 @@ def macros_de_tipo(macros: Iterable[Macro], kind: str) -> list[Macro]:
 
 
 def macro_autoreferente(macros: Iterable[Macro], display_name: str) -> Macro | None:
-    """La macro `${PLAYBOOK:<display_name>}` que se apunta a si misma."""
+    """The `${PLAYBOOK:<display_name>}` macro that points to itself."""
     for m in macros:
         if m.kind == "PLAYBOOK" and m.ref == display_name:
             return m
     return None
 
 
-# ---------------------------------------------------------------------- cuerpo
+# ---------------------------------------------------------------------- body
 def normalizar_steps(steps: Iterable[Any] | None) -> list[dict[str, Any]]:
-    """`["texto", ...]` -> `[{"text": "texto"}, ...]` (lo que espera la API)."""
+    """`["texto", ...]` -> `[{"text": "texto"}, ...]` (what the API expects)."""
     out: list[dict[str, Any]] = []
     for paso in (steps or []):
         if isinstance(paso, dict):
@@ -176,11 +173,10 @@ def construir_cuerpo(display_name: str, goal: str, *,
                      playbook_type: str = "", referenced_tools: Iterable[str] | None = None,
                      input_parameter_definitions: list | None = None,
                      output_parameter_definitions: list | None = None) -> dict[str, Any]:
-    """Arma el cuerpo del POST de un playbook (respeta R1, R3, R4).
+    """Build the body of a playbook's POST (respect R1, R3, R4).
 
-    Nunca incluye `referencedFlows` ni `referencedPlaybooks`: son de solo
-    lectura y el backend los deriva de las macros (mandarlos no guarda nada).
-    """
+    Never include `referencedFlows` or `referencedPlaybooks`: they are read-only
+    and the backend derives them from the macros (sending them saves nothing)."""
     display_name = (display_name or "").strip()
     goal = (goal or "").strip()
     if not display_name:
@@ -212,16 +208,16 @@ def construir_cuerpo(display_name: str, goal: str, *,
     return body
 
 
-# ------------------------------------------------------- politica autorreferencia
+# ------------------------------------------------------- self-reference policy
 def _texto_sin_macro(texto: str, macro: Macro) -> str:
-    """Quita la macro del texto (deja el resto intacto)."""
+    """Remove the macro from the text (leave the rest intact)."""
     return MACRO_RE.sub(
         lambda m: "" if (m.group(1) == macro.kind and m.group(2).strip() == macro.ref)
         else m.group(0), texto or "")
 
 
 def _texto_inerte(texto: str, macro: Macro) -> str:
-    """Neutraliza la macro: `${PLAYBOOK:x}` -> `{{PLAYBOOK:x}}` (token inerte)."""
+    """Neutralize the macro: `${PLAYBOOK:x}` -> `{{PLAYBOOK:x}}` (inert token)."""
     return MACRO_RE.sub(
         lambda m: ("{{PLAYBOOK:" + m.group(2).strip() + "}}")
         if (m.group(1) == macro.kind and m.group(2).strip() == macro.ref)
@@ -231,14 +227,13 @@ def _texto_inerte(texto: str, macro: Macro) -> str:
 def aplicar_politica_autorref(body: dict[str, Any], macros: list[Macro],
                               display_name: str,
                               politica: str = "error") -> tuple[dict[str, Any], list[str]]:
-    """Aplica la politica de la autorreferencia. Devuelve (cuerpo, notas).
+    """Apply the self-reference policy. Return (body, notes).
 
     `politica`:
-      * `error`      -> lanza `ReglaNegocioError` explicando las dos salidas.
-      * `guidelines` -> la macro se mueve a `instruction.guidelines` (unico
-        campo que el backend no escanea): el texto se conserva verbatim.
-      * `inert`      -> la macro se neutraliza en su sitio (token inerte).
-    """
+      * `error`      -> raises `ReglaNegocioError` explaining the two outputs.
+      * `guidelines` -> the macro moves to `instruction.guidelines` (the only
+        field the backend does not scan): the text is preserved verbatim.
+      * `inert`      -> the macro is neutralized in place (inert token)."""
     if politica not in POLITICAS_AUTOREF:
         raise ReglaNegocioError(
             f"politica de autorreferencia desconocida: {politica!r} "
@@ -286,7 +281,7 @@ def aplicar_politica_autorref(body: dict[str, Any], macros: list[Macro],
             "de expandirse en runtime")
         return nuevo, notas
 
-    # politica == "guidelines"
+    # policy == "guidelines"
     movida = propia.token
     if propia.campo == "goal":
         nuevo["goal"] = _texto_sin_macro(nuevo.get("goal", ""), propia)
@@ -298,10 +293,10 @@ def aplicar_politica_autorref(body: dict[str, Any], macros: list[Macro],
         cb = dict(nuevo.get("codeBlock") or {})
         cb["code"] = _texto_sin_macro(cb.get("code", ""), propia)
         nuevo["codeBlock"] = cb
-    # `guidelines` no se escanea: ahi puede quedar la macro tal cual.
+    # `guidelines` is not scanned: the macro can stay there as is.
     guia = instr.get("guidelines") or ""
     if propia.campo == "guidelines":
-        pass                      # ya estaba ahi: no hay nada que mover
+        pass                      # it was already there: there is nothing to move
     else:
         guia = (guia + "\n" + movida).strip() if guia else movida
     instr["guidelines"] = guia
@@ -315,13 +310,12 @@ def aplicar_politica_autorref(body: dict[str, Any], macros: list[Macro],
     return nuevo, notas
 
 
-# ------------------------------------------------------------------ resolucion
+# ------------------------------------------------------------------ resolution
 class Resolvedor:
-    """Resuelve `displayName` -> id de los recursos del agente (con cache).
+    """Resolve `displayName` -> agent resource ids (with cache).
 
-    Es la unica pieza que necesita red; se inyecta para que el resto del
-    modulo sea testeable offline.
-    """
+    It is the only piece that needs network; it is injected so the rest of the
+    module is testable offline."""
 
     def __init__(self, playbook: Callable[[str], str | None],
                  flow: Callable[[str], str | None],
@@ -348,12 +342,11 @@ class Resolvedor:
 def preflight(body: dict[str, Any], macros: list[Macro], res: Resolvedor,
               display_name: str, referenced_tools: list[str] | None = None,
               politica: str = "error") -> dict[str, Any]:
-    """Comprueba las reglas ANTES de gastar la escritura.
+    """Check the BEFORE rules for spending the write.
 
-    Devuelve el cuerpo final + el informe. Lanza `ReglaNegocioError` con el
-    mensaje que devolveria la API si algo no cuadra (asi el error llega con
-    causa y no como un HTTP 400 sin explicar).
-    """
+    Return the final body + the report. Raise `ReglaNegocioError` with the
+    message the API would return if something does not add up (so the error arrives with
+    cause and not as an unexplained HTTP 400)."""
     instr = body.get("instruction") or {}
     macros = macros or escanear_macros(
         body.get("goal", ""), instr.get("guidelines", ""),
@@ -361,7 +354,7 @@ def preflight(body: dict[str, Any], macros: list[Macro], res: Resolvedor,
 
     informe_macros: list[dict[str, Any]] = []
     faltan: list[str] = []
-    # referencedTools: explicitos + los que exigen las macros ${TOOL:...}
+    # referencedTools: explicit + those required by the ${TOOL:...} macros
     tools_explicitos = list(referenced_tools or [])
     tools_por_macro: list[str] = []
 
@@ -391,7 +384,7 @@ def preflight(body: dict[str, Any], macros: list[Macro], res: Resolvedor,
         informe_macros.append(fila)
 
     if faltan:
-        # El backend responde con el nombre del recurso, no con el token.
+        # The backend responds with the resource name, not with the token.
         detalle = ", ".join(sorted({f.split(":", 1)[1] for f in faltan}))
         raise ReglaNegocioError(
             f"referencias que no existen under the agent: {detalle} "
@@ -399,7 +392,7 @@ def preflight(body: dict[str, Any], macros: list[Macro], res: Resolvedor,
             "<agente>'). Los playbooks se crean en ORDEN TOPOLOGICO: primero "
             "los que otros referencian.")
 
-    # R3: toda macro ${TOOL:x} necesita su binding explicito.
+    # R3: every ${TOOL:x} macro needs its explicit binding.
     refs_tool = [m.ref for m in macros
                  if m.kind == "TOOL" and m.escaneada and m.ref != display_name]
     bindings = set(tools_explicitos)

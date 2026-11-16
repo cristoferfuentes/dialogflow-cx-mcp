@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Experimento: hacer la llamada al backend interno desde `static/proxy.html`
-(mismo origen que el backend, igual que la consola) y capturar las cabeceras
-REALES de cable (`requestWillBeSentExtraInfo`).
+"""Experiment: make the call to the internal backend from `static/proxy.html`
+(same origin as the backend, just like the console) and capture the REAL
+wire headers (`requestWillBeSentExtraInfo`).
 
-Sirve para comparar con lo que manda Python y ver que cabecera falta.
+It serves to compare with what Python sends and see which header is missing.
 """
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agente, targets_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
 ORIG = agente("por_defecto")
@@ -50,9 +50,9 @@ def main() -> int:
     page.goto(f"https://{CONSOLE_HOST}/static/proxy.html?usegapi=1",
               wait_until="domcontentloaded", timeout=60_000)
     time.sleep(3)
-    print("== en proxy.html:", page.url)
+    print("== in proxy.html:", page.url)
 
-    # Cookies vivas para el hash
+    # Live cookies for the hash
     live = {c["name"]: c["value"] for c in page.context.cookies() if c.get("value")}
     sapisid = live.get("SAPISID") or live.get("__Secure-3PSID")
     ts = int(time.time())
@@ -76,11 +76,11 @@ def main() -> int:
         }""",
         {"url": url, "headers": headers},
     )
-    print("== fetch desde proxy.html:", res["status"])
+    print("== fetch from proxy.html:", res["status"])
     print("   ", res["body"].replace("\n", " ")[:300])
 
     time.sleep(2)
-    print(f"\n== cabeceras de cable capturadas: {len(wire)}")
+    print(f"\n== captured wire headers: {len(wire)}")
     for w in wire[-3:]:
         print("\n--- requestId", w["requestId"])
         for k, v in sorted(w["headers"].items()):

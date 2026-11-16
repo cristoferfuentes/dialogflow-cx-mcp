@@ -1,25 +1,24 @@
-"""Cliente HTTP con las lecciones de red del workspace aplicadas (2026-11-06).
+"""Client HTTP with the workspace network lessons applied (2026-11-06).
 
-Estado REAL de la red en este host (medido, no supuesto):
+State REAL of the network on this host (measured, not assumed):
 
-1. **MTU de la interfaz = 900** (no 1500) y **TSO/GSO/GRO apagados**
-   (`ethtool -k eth0`): esa es la mitigacion que esta aplicada a nivel de
-   sistema. El clamp de MSS del socket queda por encima del MTU de la ruta y,
-   ademas, se aplica DESPUES del handshake (antes rompe la conexion:
-   BrokenPipe medido) -> hoy es inerte; la proteccion real es el MTU.
-2. **DNS con IPs fijadas en `/etc/hosts`**: `dialogflow.clients6.google.com`
-   apunta a 7 IPs. Si UNA se pone negra, `create_connection` la prueba con el
-   timeout de socket -> por eso el **timeout de connect es corto (8 s)**: se
-   cae rapido a la siguiente IP en vez de esperar 45 s. Ese era el defecto de
-   "1,6 s o 138 s" que describia la version anterior de este modulo.
-3. **Conexion TLS reutilizada por hilo** (`threading.local`): el servidor MCP
-   hace las llamadas en un solo hilo, asi que el handshake (0,66 s medido con
-   curl) se paga UNA vez, no en cada peticion.
-4. **Timeout de lectura = 45 s**; la peticion se re-firma (`SAPISIDHASH`) en
-   cada llamada, asi que no hay que refrescar nada.
+1. **MTU of the interface = 900** (not 1500) and **TSO/GSO/GRO off**
+   (`ethtool -k eth0`): that is the mitigation applied at the
+   system level. The MSS clamp of the socket sits above the MTU of the route and,
+   moreover, is applied AFTER of the handshake (before it breaks the connection:
+   BrokenPipe measured) -> today it is inert; the real protection is the MTU.
+2. **DNS with IPs pinned in `/etc/hosts`**: `dialogflow.clients6.google.com`
+   points to 7 IPs. If ONE goes black, `create_connection` tests it with the
+   socket timeout -> that is why the **connect timeout is short (8 s)**: it
+   falls quickly to the next IP instead of waiting 45 s. That was the defect of
+   "1,6 s o 138 s" described by the previous version of this module.
+3. **TLS connection reused per thread** (`threading.local`): the MCP server
+   makes the calls in a single thread, so the handshake (0.66 s measured with
+   curl) is paid ONCE, not on every request.
+4. **Read timeout = 45 s**; the request is re-firma (`SAPISIDHASH`) on
+   every call, so there is nothing to refresh.
 
-Ademas: solo se reintenta un error de RED (no un HTTP), una vez.
-"""
+Also: only a NETWORK error is retried (not an HTTP), once."""
 from __future__ import annotations
 
 import http.client
@@ -31,11 +30,11 @@ from urllib.parse import urlsplit
 
 
 class NetworkError(RuntimeError):
-    """Error de red: reintentable."""
+    """Network error: retryable."""
 
 
 class HttpStatusError(RuntimeError):
-    """Error del servidor: NO se reintenta a ciegas."""
+    """Server error: NO blind retry."""
 
     def __init__(self, status: int, body: str):
         super().__init__(f"HTTP {status}: {body[:400]}")
@@ -44,18 +43,17 @@ class HttpStatusError(RuntimeError):
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
-    """Conexion TLS con timeout de connect corto y clamp de MSS.
+    """TLS connection with a short connect timeout and a MSS clamp.
 
-    El clamp se aplica DESPUES del `connect()` (y por tanto despues del
-    handshake TLS): fijarlo antes del `connect()` rompe la conexion
-    (BrokenPipe medido). Con el MTU de la interfaz en 900 el kernel ya limita
-    los segmentos, asi que el clamp es una red de seguridad, no la proteccion
-    principal.
+    The clamp is applied AFTER the `connect()` (and therefore after the TLS
+    handshake): setting it before the `connect()` breaks the connection
+    (BrokenPipe measured). With the interface MTU at 900 the kernel already limits
+    the segments, so the clamp is a safety net, not the main
+    protection.
 
-    El timeout de connect se separa del de lectura: con las IPs fijadas en
-    `/etc/hosts`, una IP negra no puede costar 45 s de espera (se prueba la
-    siguiente IP en 8 s).
-    """
+    The connect timeout is separated from the read timeout: with the IPs fixed in
+    `/etc/hosts`, a black IP cannot cost 45 s of waiting (the
+    next IP is tried in 8 s)."""
 
     def __init__(self, host: str, port: int, timeout: float, maxseg: int,
                  connect_timeout: float | None = None):
@@ -75,7 +73,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG, self._maxseg)
         except (OSError, AttributeError):
             pass
-        # Tras el connect el socket se queda con el timeout de LECTURA.
+        # After connect the socket keeps the READ timeout.
         if self.sock and read_timeout:
             try:
                 self.sock.settimeout(read_timeout)
@@ -84,7 +82,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
 
 class Session:
-    """Sesion HTTP con keep-alive, MSS clamp y reintento solo de red."""
+    """Session HTTP with keep-alive, MSS clamp and network-only retry."""
 
     def __init__(self, timeout: float = 45.0, maxseg: int = 1200, retries: int = 1,
                  connect_timeout: float | None = 8.0):
@@ -93,8 +91,8 @@ class Session:
         self.retries = retries
         self.connect_timeout = connect_timeout
         self._local = threading.local()
-        # Cronometria por peticion (diagnostico): connect, espera de cabeceras
-        # y cuerpo. Sirve para separar "tarda la red" de "tarda el backend".
+        # Per-request timing (diagnostics): connect, header wait
+        # and body. Used to separate "the network is slow" from "the backend is slow".
         self._stats_lock = threading.Lock()
         self._stats: list[dict] = []
         self.last_stats: list[dict] = []

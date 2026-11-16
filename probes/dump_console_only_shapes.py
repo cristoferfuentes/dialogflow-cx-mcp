@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vuelca la forma REAL de los campos que el esquema publico v3beta1 no declara."""
+"""Dumps the REAL shape of the fields that the public v3beta1 schema does not declare."""
 from __future__ import annotations
 
 import json
@@ -38,7 +38,7 @@ def main() -> int:
     def ver(etiqueta, obj, esquema):
         print(f"\n### {etiqueta} ({esquema})")
         for campo in INTERESAN.get(esquema, []):
-            valor = obj.get(campo, "<AUSENTE>")
+            valor = obj.get(campo, "<MISSING>")
             print(f"   {campo}: {json.dumps(valor, ensure_ascii=False)[:400]}")
 
     ag = api.request("GET", api._url(f"{base}/agents/{agent}"))

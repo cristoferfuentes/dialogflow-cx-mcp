@@ -1,31 +1,34 @@
-"""Configuración del MCP, leída de un `.env` (sin dependencias externas).
+"""MCP configuration, read from a `.env` (no external dependencies).
 
-Todo lo que el MCP necesita son **credenciales**, no un navegador:
+All the MCP needs is **credentials**, not a browser:
 
-    CXP_PROJECT=<proyecto>
+    CXP_PROJECT=<project>
     CXP_LOCATION=global
-    CXP_QUOTA_PROJECT=<proyecto de cuota>   # opcional: si no, es CXP_PROJECT
+    CXP_QUOTA_PROJECT=<quota project>   # optional: if absent, it is CXP_PROJECT
     CXP_CONSOLE_ORIGIN=https://conversational-agents.cloud.google.com
     CXP_API_KEY=AIzaSy...
     CXP_COOKIE="SAPISID=...; SID=...; HSID=...; SSID=...; APISID=..."
-    CXP_DEFAULT_AGENT=<uuid del agente con el que se trabaja>
+    CXP_DEFAULT_AGENT=<uuid of the agent being worked with>
 
-    # --- PERMISOS POR AGENTE (lista blanca) --------------------------------
-    # Un agente sin entrada aqui NO es accesible en absoluto.
-    CXP_AGENT_READ=<uuid>,<uuid>          # leer (GET/list)
-    CXP_AGENT_READWRITE=<uuid>            # leer + escribir (POST/PATCH/DELETE)
-    CXP_PROJECTS=<proyecto>,...           # opcional: limita los proyectos
+    `CXP_COOKIE` must be the **full jar** of `.google.com` (copied from the
+    browser). With only the 5 mandatory cookies the backend responds 401 as
+    soon as the session renews (measured).
 
-    CXP_READ_ONLY_AGENTS=<uuid>,<uuid>     # (legacy) se une a CXP_AGENT_READ
-    CXP_SESSION_FILE=<ruta a un storage_state .json>   # alternativa a CXP_COOKIE
+    # --- PERMISSIONS PER AGENT (allowlist) --------------------------------
+    # An agent with no entry here is NOT accessible at all.
+    CXP_AGENT_READ=<uuid>,<uuid>          # read (GET/list)
+    CXP_AGENT_READWRITE=<uuid>            # read + write (POST/PATCH/DELETE)
+    CXP_PROJECTS=<project>,...           # optional: limits the projects
 
-Las entradas de permiso admiten dos formas: `<uuid>` (el permiso viaja con el
-uuid, vale en cualquier proyecto) o `<proyecto>/<uuid>` (empareja proyecto y
-agente). El MCP trabaja por defecto contra `v3beta1` (`CXP_API_VERSION`).
+    CXP_READ_ONLY_AGENTS=<uuid>,<uuid>     # (legacy) merged into CXP_AGENT_READ
+    CXP_SESSION_FILE=<path to a storage_state .json>   # alternative to CXP_COOKIE
 
-El `.env` se busca en: (1) la variable `CXP_ENV_FILE`, (2) el directorio del
-paquete, (3) el directorio de trabajo, (4) `~/.config/cx-playbook.env`.
-"""
+Permission entries accept two forms: `<uuid>` (the permission travels with the
+uuid, valid in any project) or `<proyecto>/<uuid>` (pairs project and
+agent). The MCP works by default against `v3beta1` (`CXP_API_VERSION`).
+
+The `.env` is looked up in: (1) the `CXP_ENV_FILE` variable, (2) the package
+directory, (3) the working directory, (4) `~/.config/cx-playbook.env`."""
 from __future__ import annotations
 
 import json
@@ -35,12 +38,22 @@ from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent.parent  # mcp-cx-playbook/
 
-# Las 5 cookies que el backend interno EXIGE (medido: con 4 de 5 -> HTTP 401).
+# The 5 cookies that the internal backend REQUIRES (measured: with 4 of 5 -> HTTP 401).
+# NOTE: they are the MINIMUM, not the full list. MEASURED (2026-11-13): with only those
+# 5 the backend responds 401 "invalid authentication credentials" as soon as the
+# browser session renews (the session cookies `__Secure-*PSIDTS` /
+# `__Host-GAPS` / `SIDCC` / `OSID` are also revalidated). The remedy is to send
+# the JAR COMPLETE from `.google.com` (23 cookies in the real browser) and keep
+# requiring these 5 as a minimum sanity check.
 REQUIRED_COOKIES = ("SAPISID", "SID", "HSID", "SSID", "APISID")
+
+# Session cookie prefixes that must be sent in full for the backend to accept
+# the call (measured: removing them -> 401).
+SESSION_COOKIE_PREFIXES = ("__Secure-", "__Host-")
 
 
 def parse_env(text: str) -> dict[str, str]:
-    """Parser minimo de `.env`: KEY=VALUE, comillas opcionales, `#` comments."""
+    """Minimal `.env` parser: KEY=VALUE, optional quotes, `#` comments."""
     out: dict[str, str] = {}
     for raw in text.splitlines():
         line = raw.strip()
@@ -74,40 +87,40 @@ class Config:
     location: str = "global"
     console_origin: str = "https://conversational-agents.cloud.google.com"
     api_key: str = ""
-    # Version del proto del backend interno. v3beta1 es la que hay que usar
-    # (en `v3` no existen campos como `llmModelSettings.parameters` y se
-    # descartan en silencio).
+    # Internal backend proto version. v3beta1 is the one to use
+    # (in `v3` fields such as `llmModelSettings.parameters` do not exist and are silently dropped).
     api_version: str = "v3beta1"
-    # Proyecto de cuota (`x-goog-user-project`). Viene de `CXP_QUOTA_PROJECT` y,
-    # si no se pone, es el propio `CXP_PROJECT`. Es un dato de DESPLEGUE: el
-    # MCP no debe llevar ninguno fijado en el codigo.
+    # Quota project (`x-goog-user-project`). Comes from `CXP_QUOTA_PROJECT` and,
+    # if not set, is `CXP_PROJECT` itself. It is a DEPLOYMENT datum: the
+    # MCP must not carry any hardcoded one.
     quota_project: str = ""
-    # Credenciales
+    # Credentials
     cookies: dict[str, str] = field(default_factory=dict)
     sapisid: str = ""
-    # Agentes
+    # Agents
     default_agent: str = ""
     read_only_agents: list[str] = field(default_factory=list)  # legacy
-    # Permisos (lista blanca)
+    # Permissions (allowlist)
     agent_read: list[str] = field(default_factory=list)
     agent_readwrite: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
-    # Ruta del fichero de credenciales (informativo)
+    # Credentials file path (informational)
     env_file: Path | None = None
 
     # Red
-    socket_timeout: float = 45.0        # timeout de LECTURA
-    connect_timeout: float = 8.0         # timeout de CONNECT (IPs fijadas en /etc/hosts)
+    socket_timeout: float = 45.0        # READ timeout
+    connect_timeout: float = 8.0         # CONNECT timeout (IPs pinned in /etc/hosts)
     tcp_maxseg: int = 1200
     http_retries: int = 1
-    # TTL del cache de catalogos (id->displayName de flows/pages/playbooks).
-    # Los catalogos cambian muy poco y sus payloads son enormes (list_playbooks
-    # del clon = 770 KB) -> se cachean. Se invalidan al escribir.
+    # TTL of the catalog cache (id->displayName of flows/pages/playbooks).
+    # Catalogs change very little and their payloads are huge (list_playbooks
+    # of the clone = 770 KB) -> they are cached. They are invalidated on write.
     catalog_ttl: float = 120.0
 
-    # --- Solo para el helper de login (FUERA del MCP) -----------------------
-    # El MCP no usa nada de esto: vive en el package por comodidad de imports.
+    # --- Login helper only (OUTSIDE of MCP) -----------------------
+    # The MCP uses none of this: it lives in the package for import convenience.
     display: str = ":99"
+    cdp_port: int = 9222
     novnc_url: str = ""
     real_profile_dir: Path = field(default_factory=lambda: PKG_DIR / ".browser-profile-real")
     state_file: Path = field(default_factory=lambda: PKG_DIR / ".session-state.json")
@@ -133,9 +146,9 @@ class Config:
     def credentials_ok(self) -> bool:
         return bool(self.api_key and self.sapisid and not self.missing_cookies())
 
-    # ---------------------------------------------------------------- agentes
+    # ---------------------------------------------------------------- agents
     def is_read_only(self, agent_id: str) -> bool:
-        """Legacy: el agente esta en la lista de solo lectura."""
+        """Legacy: the agent is on the read-only list."""
         return agent_id in self.read_only_agents
 
     # ---------------------------------------------------------------- helpers
@@ -149,25 +162,34 @@ class Config:
 
 
 def _cookies_from_raw(raw: str) -> dict[str, str]:
-    """'SAPISID=..; SID=..' -> dict (solo las cookies que nos interesan)."""
+    """'SAPISID=..; SID=..' -> dict.
+
+    Keeps **all** cookies, not just the 5 mandatory ones: the
+    backend revalidates the rest of the session (measured: with 5 cookies and the session
+    renewed -> HTTP 401; with the full jar -> 200)."""
     out: dict[str, str] = {}
     for parte in raw.split(";"):
         if "=" not in parte:
             continue
         k, _, v = parte.strip().partition("=")
-        if k in REQUIRED_COOKIES and v:
+        k = k.strip()
+        v = v.strip()
+        if k and v:
             out[k] = v
     return out
 
 
 def _cookies_from_session_file(path: Path) -> dict[str, str]:
-    """Extrae las 5 cookies de un `storage_state` de Playwright (.google.com)."""
+    """Cookies from `.google.com` of a Playwright `storage_state`.
+
+    **All** the google.com ones are kept (not just the 5 mandatory ones): see the
+    `REQUIRED_COOKIES` note."""
     state = json.loads(path.read_text(encoding="utf-8"))
     by_name: dict[str, str] = {}
     for c in state.get("cookies", []):
         dom = (c.get("domain") or "").lstrip(".").lower()
         if dom == "google.com" or dom.endswith(".google.com"):
-            if c.get("name") in REQUIRED_COOKIES and c.get("value"):
+            if c.get("name") and c.get("value"):
                 by_name[c["name"]] = c["value"]
     return by_name
 
@@ -177,12 +199,12 @@ def _split_list(raw: str) -> list[str]:
 
 
 def load_config(env_file: str | os.PathLike | None = None) -> Config:
-    """Carga la configuracion del `.env` (o de las variables `CXP_*`)."""
+    """Load the `.env` configuration (or the `CXP_*` variables)."""
     env: dict[str, str] = {}
     path = Path(env_file) if env_file else find_env_file()
     if path and path.exists():
         env.update(parse_env(path.read_text(encoding="utf-8")))
-    # Las variables de entorno tienen prioridad sobre el fichero.
+    # Environment variables take priority over the file.
     for k in list(env) + [f"CXP_{n}" for n in (
         "PROJECT", "LOCATION", "CONSOLE_ORIGIN", "API_KEY", "COOKIE", "SAPISID",
         "SID", "HSID", "SSID", "APISID", "DEFAULT_AGENT", "READ_ONLY_AGENTS",
@@ -199,32 +221,36 @@ def load_config(env_file: str | os.PathLike | None = None) -> Config:
     ).rstrip("/")
     cfg.api_key = env.get("CXP_API_KEY", "")
     cfg.api_version = env.get("CXP_API_VERSION", "v3beta1").strip() or "v3beta1"
-    # Proyecto de cuota: `CXP_QUOTA_PROJECT` y, si no se pone, el proyecto
-    # principal. (Lo usan el helper de login y el cliente de la API publica,
-    # que NO son el camino principal del MCP.)
+    # Project quota: `CXP_QUOTA_PROJECT` and, if not set, the main
+    # project. (Used by the login helper and the public API client,
+    # which are NOT the main MCP path.)
     cfg.quota_project = env.get("CXP_QUOTA_PROJECT", "").strip() or cfg.project
-    # Solo para el helper de login (FUERA del MCP).
+    # Login helper only (OUTSIDE of MCP).
     cfg.display = env.get("CXP_DISPLAY", ":99").strip() or ":99"
+    try:
+        cfg.cdp_port = int(env.get("CXP_CDP_PORT", "9222"))
+    except ValueError:
+        cfg.cdp_port = 9222
     cfg.novnc_url = env.get("CXP_NOVNC_URL", "").strip()
     cfg.default_agent = env.get("CXP_DEFAULT_AGENT", "")
     cfg.read_only_agents = _split_list(env.get("CXP_READ_ONLY_AGENTS", ""))
 
-    # --- Permisos: lista blanca de agentes ---------------------------------
-    # `CXP_AGENT_READWRITE` (leer + escribir) y `CXP_AGENT_READ` (solo leer).
-    # El legacy `CXP_READ_ONLY_AGENTS` se une a la lista de lectura.
+    # --- Permissions: agent allowlist ---------------------------------
+    # `CXP_AGENT_READWRITE` (read + write) and `CXP_AGENT_READ` (read-only).
+    # The legacy `CXP_READ_ONLY_AGENTS` joins the read list.
     cfg.agent_readwrite = _split_list(env.get("CXP_AGENT_READWRITE", ""))
     cfg.agent_read = _split_list(env.get("CXP_AGENT_READ", ""))
     for a in cfg.read_only_agents:
         if a not in cfg.agent_read:
             cfg.agent_read.append(a)
-    # El agente por defecto siempre es accesible (al menos, para leer).
+    # The default agent is always accessible (at least for reading).
     if cfg.default_agent:
         if cfg.default_agent not in cfg.agent_read and \
                 cfg.default_agent not in cfg.agent_readwrite:
             cfg.agent_read.append(cfg.default_agent)
     cfg.projects = _split_list(env.get("CXP_PROJECTS", ""))
 
-    # Credenciales: cookie cruda > cookies sueltas > fichero de sesion.
+    # Credentials: raw cookie > loose cookies > session file.
     if env.get("CXP_COOKIE"):
         cfg.cookies = _cookies_from_raw(env["CXP_COOKIE"])
     for name in REQUIRED_COOKIES:
@@ -235,5 +261,5 @@ def load_config(env_file: str | os.PathLike | None = None) -> Config:
         sf = Path(env["CXP_SESSION_FILE"]).expanduser()
         if sf.exists():
             cfg.cookies = _cookies_from_session_file(sf)
-    cfg.sapisid = cfg.cookies.get("SAPISID", "")
+    cfg.sapisid = env.get("CXP_SAPISID", "").strip() or cfg.cookies.get("SAPISID", "")
     return cfg

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Prueba final: llamada HTTP PURA (python, sin curl y sin navegador) al
-backend interno de la consola con la autenticacion de primera parte.
+"""Final test: PURE HTTP call (python, no curl and no browser) to the
+console's internal backend with first party authentication.
 
-Clave medida: hay que mandar SOLO las cookies del dominio `.google.com` (las
-que el navegador manda). Mandar tambien las de `accounts.google.com` u otros
-dominios rompe la credencial -> HTTP 401.
+Key measured fact: you have to send ONLY the cookies of the `.google.com` domain
+(the ones the browser sends). Sending the ones of `accounts.google.com` or other
+domains breaks the credential -> HTTP 401.
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agente, targets_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST
 from cxp.httpclient import Session
 
@@ -32,7 +32,7 @@ OP = _TARGET["page"]
 
 
 def cookies_for_google(state_file: Path) -> tuple[str, str]:
-    """(sapisid, cookie header) con SOLO las cookies de `.google.com`."""
+    """(sapisid, cookie header) with ONLY the `.google.com` cookies."""
     state = json.loads(state_file.read_text(encoding="utf-8"))
     keep = []
     for c in state.get("cookies", []):
@@ -46,14 +46,14 @@ def cookies_for_google(state_file: Path) -> tuple[str, str]:
 
 
 def auth_header(origin: str, sapisid: str, ts: int) -> str:
-    h = hashlib.sha1(f"{ts} {sapisid} {origin}".encode("utf-8")).hexdigest()
+    h = hashlib.sha1(f"{ts} {sapisid} {origin}".encode()).hexdigest()
     return f"SAPISIDHASH {ts}_{h} SAPISID1PHASH {ts}_{h} SAPISID3PHASH {ts}_{h}"
 
 
 def main() -> int:
     cfg = load_config()
     sapisid, cookie = cookies_for_google(cfg.state_file)
-    print(f"== cookies .google.com: {len(cookie.split('; '))}  sapisid={'si' if sapisid else 'NO'}")
+    print(f"== .google.com cookies: {len(cookie.split('; '))}  sapisid={'yes' if sapisid else 'NO'}")
 
     headers = {
         "accept": "*/*",
@@ -72,11 +72,11 @@ def main() -> int:
     http = Session(timeout=60.0, maxseg=cfg.tcp_maxseg, retries=1)
     t = time.time()
     status, body = http.request("GET", url, headers)
-    print(f"== HTTP {status} en {time.time()-t:.1f}s")
+    print(f"== HTTP {status} in {time.time()-t:.1f}s")
     if status == 200:
         data = json.loads(body)
         print("   etag:", data.get("etag"))
-        print("   claves:", sorted(data.keys()))
+        print("   keys:", sorted(data.keys()))
         for r in data.get("transitionRoutes") or []:
             print(f"   - {r.get('name','').split('/')[-1]}  targetPlaybook="
                   f"{str(r.get('targetPlaybook')).split('/')[-1]}")

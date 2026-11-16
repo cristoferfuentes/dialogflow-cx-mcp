@@ -1,10 +1,10 @@
-"""Autenticacion: token OAuth (gcloud) o primera parte de la consola (SAPISIDHASH).
+"""Authentication: OAuth token (gcloud) or first part of the console (SAPISIDHASH).
 
-La consola "Conversational Agents" habla con `dialogflow.clients6.google.com` con
-`googleapis.config/auth/useFirstPartyAuth` + `client/cors`: o sea, con las cookies
-de Google del navegador (UDS) y NO con un bearer token.
+The "Conversational Agents" console talks to `dialogflow.clients6.google.com` with
+`googleapis.config/auth/useFirstPartyAuth` + `client/cors`: that is, with the
+Google cookies of the browser (UDS) and NOT with a bearer token.
 
-`SAPISIDHASH` es el mecanismo de UDS:
+`SAPISIDHASH` is the UDS mechanism:
     ts = epoch_seconds
     h  = sha1(f"{ts} {sapisid} {origin}")
     Authorization: SAPISIDHASH {ts}_{h}
@@ -17,7 +17,7 @@ import time
 
 
 def gcloud_access_token(timeout: float = 30.0) -> str | None:
-    """Token de ADC via gcloud. None si no hay gcloud o no hay sesion."""
+    """ADC token via gcloud. None if there is no gcloud or no session."""
     try:
         out = subprocess.run(
             ["gcloud", "auth", "application-default", "print-access-token"],
@@ -38,7 +38,7 @@ def sapisid_hash(origin: str, sapisid: str, ts: int | None = None) -> str:
 
 
 def first_party_headers(origin: str, sapisid: str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Cabeceras con las que la consola llama a su backend."""
+    """Headers with which the console calls its backend."""
     headers = {
         "Authorization": f"SAPISIDHASH {sapisid_hash(origin, sapisid)}",
         "X-Goog-AuthUser": "0",
@@ -57,7 +57,7 @@ def cookie_header(cookies: dict[str, str]) -> str:
 
 
 def pick_sapisid(cookie_list: list[dict]) -> str | None:
-    """Elige el SAPISID usable: __Secure-3PSID > SAPISID > __Secure-1PSID."""
+    """Pick the usable SAPISID: __Secure-3PSID > SAPISID > __Secure-1PSID."""
     by_name = {c.get("name"): c.get("value") for c in cookie_list}
     for name in ("__Secure-3PSID", "SAPISID", "__Secure-1PSID", "APISID"):
         val = by_name.get(name)
@@ -67,7 +67,7 @@ def pick_sapisid(cookie_list: list[dict]) -> str | None:
 
 
 def pick_google_cookies(cookie_list: list[dict]) -> dict[str, str]:
-    """Cookies de autenticacion de Google que hay que reenviar al backend."""
+    """Google authentication cookies that must be forwarded to the backend."""
     wanted = (
         "__Secure-3PSID",
         "SAPISID",

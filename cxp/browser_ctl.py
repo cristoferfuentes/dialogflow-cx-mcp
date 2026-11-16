@@ -1,14 +1,13 @@
-"""Control del Chrome REAL por MCP (acciones de bajo nivel sobre la consola).
+"""Control of Chrome REAL via MCP (low-level actions on the console).
 
-El MCP no usa una API publica para esto: la consola "Conversational Agents"
-llama a un backend interno (`dialogflow.clients6.google.com`) con la
-autenticacion de primera parte (cookies de Google) y con un proto que SI
-expone `targetPlaybook` en `TransitionRoute`. Por eso hay que pilotar el
-navegador real.
+MCP does not use a public API for this: the "Conversational Agents" console
+calls an internal backend (`dialogflow.clients6.google.com`) with
+first-party authentication (Google cookies) and with a proto that DOES
+expose `targetPlaybook` in `TransitionRoute`. That is why the real
+browser must be driven.
 
-Todas las acciones devuelven un dict con lo que ha pasado (no lanzan
-excepciones al llamante) para que el agente pueda decidir el siguiente paso.
-"""
+All actions return a dict with what happened (they do not throw
+exceptions to the caller) so the agent can decide the next step."""
 from __future__ import annotations
 
 import time
@@ -27,7 +26,7 @@ def _page(br: ConsoleBrowser):
     return br._page
 
 
-# --------------------------------------------------------------------- acciones
+# --------------------------------------------------------------------- actions
 def ctl_status(br: ConsoleBrowser) -> dict:
     page = _page(br)
     out: dict[str, Any] = {}
@@ -76,7 +75,7 @@ def ctl_text(br: ConsoleBrowser, selector: str = "body", limit: int = 6000) -> d
 
 def ctl_click(br: ConsoleBrowser, selector: str = "", texto: str = "", nth: int = 0,
               timeout: float = 15.0) -> dict:
-    """Pulsa un elemento por selector CSS o por texto visible."""
+    """Click an element by selector CSS or by visible text."""
     page = _page(br)
     loc = None
     if texto:
@@ -142,7 +141,7 @@ def ctl_eval(br: ConsoleBrowser, js: str) -> dict:
 
 
 def ctl_requests(br: ConsoleBrowser) -> dict:
-    """Devuelve las peticiones XHR capturadas (hay que llamar antes a start_recording)."""
+    """Returns the captured XHR requests (start_recording must be called first)."""
     reqs = br.stop_recording()
     return {
         "ok": True,
@@ -169,7 +168,7 @@ def ctl_wait(br: ConsoleBrowser, ms: int = 2000) -> dict:
     return {"ok": True, "esperado_ms": ms, "url": page.url}
 
 
-# --------------------------------------------------------------------- despacho
+# --------------------------------------------------------------------- dispatch
 ACCIONES = {
     "status": ctl_status,
     "open": ctl_open,
@@ -203,7 +202,7 @@ def dispatch(br: ConsoleBrowser, accion: str, **kw) -> dict:
 
 # --------------------------------------------------------------- recipes UI
 def list_selectors(br: ConsoleBrowser, limite: int = 120) -> dict:
-    """Lista los elementos interactivos de la pagina (para afinar selectores)."""
+    """List the interactive elements of the page (to refine selectors)."""
     page = _page(br)
     js = """
     () => {
@@ -229,7 +228,7 @@ def list_selectors(br: ConsoleBrowser, limite: int = 120) -> dict:
 
 
 def wait_for_text(br: ConsoleBrowser, texto: str, timeout_s: float = 30.0) -> dict:
-    """Espera a que aparezca un texto en la pagina."""
+    """Wait for text to appear on the page."""
     page = _page(br)
     deadline = time.time() + timeout_s
     while time.time() < deadline:

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Replica (HTTP puro, sin navegador) de una peticion al backend interno de la
-consola, usando EXACTAMENTE las cabeceras de cable que se han capturado.
+"""Replay (pure HTTP, no browser) of a request to the console's internal backend,
+using EXACTLY the wire headers that were captured.
 
-El truco esta en `x-browser-validation` / `x-browser-year`: la consola los
-manda y el backend los exige para validar la credencial de primera parte
-(sin ellos -> HTTP 401 "invalid authentication credentials").
+The trick is in `x-browser-validation` / `x-browser-year`: the console sends them
+and the backend requires them to validate the first party credential
+(without them -> HTTP 401 "invalid authentication credentials").
 
-Uso: .venv/bin/python replay_http.py [--agent clon] [--write]
+Usage: .venv/bin/python replay_http.py [--agent clon] [--write]
 """
 from __future__ import annotations
 
@@ -19,15 +19,15 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cxp.config import load_config
-
 from _entorno import agentes_de_sonda
+
+from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 from cxp.httpclient import Session
 
 AGENTS = agentes_de_sonda()
 
-# Cabeceras que el navegador manda SIEMPRE en esta API (capturadas de cable).
+# Headers that the browser ALWAYS sends on this API (captured from the wire).
 BROWSER_HEADERS = {
     "accept": "*/*",
     "accept-language": "es-419,es;q=0.9,es;q=0.9;q=0.8",
@@ -46,7 +46,7 @@ BROWSER_HEADERS = {
 
 
 def browser_fingerprint(cfg) -> tuple[dict[str, str], str]:
-    """(cabeceras del navegador, cookie header) tomados del Chrome real."""
+    """(browser headers, cookie header) taken from the real Chrome."""
     from cxp.chrome_cdp import RealChrome
 
     ch = RealChrome(display=cfg.display, profile_dir=cfg.real_profile_dir, port=cfg.cdp_port)
@@ -73,8 +73,8 @@ def browser_fingerprint(cfg) -> tuple[dict[str, str], str]:
     cdp.on("Network.requestWillBeSentExtraInfo", on_extra)
     cdp.on("Network.requestWillBeSentExtraInfo", on_cookie)
 
-    # Se dispara una peticion cualquiera al backend para que el navegador
-    # revele sus cabeceras de validacion.
+    # Any request to the backend is fired so that the browser
+    # reveals its validation headers.
     page.goto(f"https://{CONSOLE_HOST}/static/proxy.html?usegapi=1",
               wait_until="domcontentloaded", timeout=60_000)
     time.sleep(2)
@@ -119,7 +119,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    print("== sacando la huella del navegador real...", flush=True)
+    print("== extracting the fingerprint of the real browser...", flush=True)
     extra, cookie_header = browser_fingerprint(cfg)
     print(f"   x-browser-validation: {extra.get('x-browser-validation')}", flush=True)
     print(f"   cookies: {len(cookie_header.split('; '))}", flush=True)
@@ -132,7 +132,7 @@ def main() -> int:
     http = Session(timeout=60.0, maxseg=cfg.tcp_maxseg, retries=1)
     t = time.time()
     status, body = http.request("GET", url, headers)
-    print(f"\n== HTTP {status} en {time.time()-t:.1f}s", flush=True)
+    print(f"\n== HTTP {status} in {time.time()-t:.1f}s", flush=True)
     if status == 200:
         data = json.loads(body)
         print("   etag:", data.get("etag"))
@@ -141,7 +141,7 @@ def main() -> int:
                   f"{str(r.get('targetPlaybook')).split('/')[-1]}")
         if args.out:
             Path(args.out).write_text(body, encoding="utf-8")
-            print("   escrito", args.out)
+            print("   written", args.out)
     else:
         print("   ", " ".join(body.split())[:400])
     return 0

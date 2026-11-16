@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Sonda 3 (v2): matriz de escritura de los campos fuera de esquema.
+"""Probe 3 (v2): write matrix of the out of schema fields.
 
-Usa el codigo de produccion (`cxp.console_fields.set_field`). Todo se hace en
-recursos TEMPORALES o con reversion inmediata. Al final imprime la matriz
-(escribible / no escribible) que alimenta el catalogo del MCP.
+It uses the production code (`cxp.console_fields.set_field`). Everything is done on
+TEMPORARY resources or with an immediate revert. At the end it prints the matrix
+(writable / not writable) that feeds the MCP catalog.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def main() -> int:
     ab = api._base(project)
 
     def probar(etiqueta, recurso, campo, valor, revertir=True, ruta_lectura=None):
-        """`ruta_lectura` = donde comprobar el valor tras escribir."""
+        """`ruta_lectura` = where to check the value after writing."""
         try:
             res = set_field(api, recurso, campo, valor, dry_run=False, project=project)
             if ruta_lectura:
@@ -42,7 +42,7 @@ def main() -> int:
             MATRIZ.append((etiqueta, ok, json.dumps(res.despues, ensure_ascii=False)[:100]))
             print(f"  [{'OK ' if ok else 'NO '}] {etiqueta}")
             if not ok:
-                print(f"        leido: {json.dumps(res.despues, ensure_ascii=False)[:150]}")
+                print(f"        read: {json.dumps(res.despues, ensure_ascii=False)[:150]}")
                 if res.error:
                     print(f"        error: {res.error[:200]}")
             if revertir and res.escrito:
@@ -53,7 +53,7 @@ def main() -> int:
             print(f"  [ERR] {etiqueta}: {str(exc)[:220]}")
             return None
 
-    # ------------------------------------------------------------ temporales
+    # ------------------------------------------------------------ temporary
     flow = api.request("POST", api._url(f"{ab}/agents/{agent}/flows"),
                        {"displayName": "zz_tmp_gap_probe", "description": "temporal"})
     flow_id = flow["name"].rsplit("/", 1)[-1]
@@ -68,20 +68,20 @@ def main() -> int:
     pb_ref = f"{base}/playbooks/" + (pbs[0].get("name") or "").rsplit("/", 1)[-1]
     ets = api.list_entity_types(agent, project)
     et_ref = f"{base}/entityTypes/" + (ets[0].get("name") or "").rsplit("/", 1)[-1]
-    print(f"flow={flow_id} pagina={page_name.rsplit('/',1)[-1]}")
+    print(f"flow={flow_id} page={page_name.rsplit('/',1)[-1]}")
 
-    print("\n== PAGINA ==")
-    probar("Page.transitionRoutes (array completo con targetPlaybook)", page_name,
+    print("\n== PAGE ==")
+    probar("Page.transitionRoutes (full array with targetPlaybook)", page_name,
            "transitionRoutes", [{"condition": "true", "targetPlaybook": pb_ref}],
            revertir=False,
            ruta_lectura="transitionRoutes[0].targetPlaybook")
 
-    # ruta existente -> cambiar solo el destino
-    probar("Page.transitionRoutes[0].targetPlaybook (ruta existente)", page_name,
+    # existing route -> change only the target
+    probar("Page.transitionRoutes[0].targetPlaybook (existing route)", page_name,
            "transitionRoutes[0].targetPlaybook", pb_ref, revertir=False,
            ruta_lectura="transitionRoutes[0].targetPlaybook")
 
-    probar("Page.form.parameters[0].description (array completo)", page_name, "form",
+    probar("Page.form.parameters[0].description (full array)", page_name, "form",
            {"parameters": [{"displayName": "p1", "entityType": et_ref,
                             "description": "descripcion de prueba"}]},
            revertir=False, ruta_lectura="form.parameters[0].description")
@@ -110,12 +110,12 @@ def main() -> int:
             esquemas = [{"name": "probe_accion",
                          "inputParameters": [{"name": "q", "schema": '{"type":"string"}'}],
                          "outputParameters": []}]
-            probar("Tool.actionSchemas (tool con openApiSpec)", tool_name,
+            probar("Tool.actionSchemas (tool with openApiSpec)", tool_name,
                    "actionSchemas", esquemas)
         except Exception as exc:
-            print("  [ERR] tool temporal:", str(exc)[:240])
+            print("  [ERR] temporary tool:", str(exc)[:240])
 
-    # tool de data store (sin openApiSpec): el modelo de resumir
+    # data store tool (without openApiSpec): the summarization model
     origen_ds = next((t for t in tools if t.get("dataStoreSpec")), None)
     if origen_ds:
         cuerpo = {k: v for k, v in origen_ds.items()
@@ -134,7 +134,7 @@ def main() -> int:
                    "dataStoreSpec", ds, revertir=False,
                    ruta_lectura="dataStoreSpec.models.summarizationModel.model")
         except Exception as exc:
-            print("  [ERR] tool ds temporal:", str(exc)[:240])
+            print("  [ERR] temporary ds tool:", str(exc)[:240])
 
     print("\n== ENTITY TYPE ==")
     try:
@@ -161,7 +161,7 @@ def main() -> int:
         atexit.register(lambda: api.request(
             "DELETE", api._url(f"{ab}/agents/{agent}/intents/"
                                + intent_name.rsplit("/", 1)[-1])))
-        probar("Intent.trainingPhrases (array completo con auto=False)", intent_name,
+        probar("Intent.trainingPhrases (full array with auto=False)", intent_name,
                "trainingPhrases",
                [{"parts": [{"text": "hola", "auto": False}], "repeatCount": 1}],
                revertir=False,
@@ -169,7 +169,7 @@ def main() -> int:
     except Exception as exc:
         print("  [ERR] intent:", str(exc)[:240])
 
-    print("\n== AGENTE ==")
+    print("\n== AGENT ==")
     probar("Agent.webClientSettings", base, "webClientSettings",
            {"boxBorderRadius": "8"})
     probar("Agent.advancedSettings (playbackInterruption)", base, "advancedSettings",
@@ -179,9 +179,9 @@ def main() -> int:
     probar("Agent.advancedSettings (enabled)", base, "advancedSettings",
            {"enabled": True})
 
-    print("\n== MATRIZ ==")
+    print("\n== MATRIX ==")
     for etiqueta, ok, det in MATRIZ:
-        print(f"  {'ESCRIBIBLE' if ok else 'no        '} | {etiqueta:<58} | {det}")
+        print(f"  {'WRITABLE' if ok else 'not      '} | {etiqueta:<58} | {det}")
     return 0
 
 

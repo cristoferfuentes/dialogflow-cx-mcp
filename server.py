@@ -1,49 +1,47 @@
-"""MCP `cx-playbook`: **espejo de la API v3beta1 de Dialogflow CX** + el
-agregado que la API publica no puede expresar.
+"""MCP `cx-playbook`: **mirror of Dialogflow CX API v3beta1** + the
+addition that the public API cannot express.
 
-Herramientas
+Tools
 ------------
-  cx_status                   configuracion, permisos y salud del backend
-  cx_discover                 el mapa de la API (sale del discovery doc oficial)
-  cx_api                      passthrough generico: los 162 metodos de v3beta1, 1:1
-  ...                         herramientas tipadas del nucleo (agentes, flows, pages,
+  cx_status                   backend configuration, permissions and health
+  cx_discover                 the API map (comes from the official discovery doc)
+  cx_api                      generic passthrough: the 162 v3beta1 methods, 1:1
+  ...                         typed core tools (agents, flows, pages,
                               playbooks, intents, entityTypes, tools, webhooks,
                               conversations, sessions, changelogs...)
-  cx_set_route_playbook       destino a playbook de una transition route DE PAGINA
-  cx_set_flow_route_playbook  destino a playbook del ROUTER DE UN FLOW  <-- el extra
-  cx_set_group_route_playbook destino a playbook de una ruta de un GRUPO DE RUTAS
-  cx_gaps                     los huecos de la API publica, detectados EN VIVO
-  cx_set_console_field        escribir CUALQUIER campo (incluido los fuera de esquema)
+  cx_set_route_playbook       playbook target of a transition route OF PAGE
+  cx_set_flow_route_playbook  playbook target of the ROUTER OF A FLOW  <-- the extra
+  cx_set_group_route_playbook playbook target of a route of a GROUP OF ROUTES
+  cx_gaps                     the gaps of the public API, detected LIVE
+  cx_set_console_field        write ANY field (including those outside the schema)
 
-El MCP es **atomico** y **sin navegador**:
+The MCP is **atomic** and **browserless**:
 
-Todo va por HTTP contra el backend interno de la consola
-(`dialogflow.clients6.google.com/v3alpha1|v3beta1`) con autenticacion de
-primera parte (las 5 cookies de sesion de Google + firma `SAPISIDHASH`).
-Las credenciales se leen de un `.env`; ver README.md.
+Everything goes through HTTP against the console's internal backend
+(`dialogflow.clients6.google.com/v3alpha1|v3beta1`) with first-party authentication (the 5 Google session cookies + `SAPISIDHASH`
+signature).
+Credentials are read from an `.env`; see README.md.
 
-Por que el backend interno y no la API publica: es el unico que conserva
-`transitionRoutes[].targetPlaybook`; en la API publica ese campo **se descarta
-en silencio** (el `oneof target` solo admite `target_page` y `target_flow`).
+Why the internal backend and not the public API: it is the only one that keeps
+`transitionRoutes[].targetPlaybook`; in the public API that field **is silently
+dropped** (the `oneof target` only accepts `target_page` and `target_flow`).
 
-Permisos (lista blanca por agente, en el `.env`):
+Permissions (allowlist per agent, in the `.env`):
 
-    CXP_AGENT_READWRITE=<uuid>[,...]   leer + escribir
-    CXP_AGENT_READ=<uuid>[,...]        solo leer
-    CXP_PROJECTS=<proyecto>[,...]      (opcional) limita los proyectos
+    CXP_AGENT_READWRITE=<uuid>[,...]   read + write
+    CXP_AGENT_READ=<uuid>[,...]        read-only
+    CXP_PROJECTS=<project>[,...]      (optional) limits the projects
 
-El agente de referencia y el de PROD son de solo lectura; el clon es el
-unico escribible. La guarda compara el **id resuelto**, no un alias, y se
-aplica en la capa baja (`cxp/console_api.py`), no solo en esta capa.
+The reference agent and the PROD one are read-only; the clone is the
+only writable one. The guard compares the **resolved id**, not an alias, and it
+is applied at the low layer (`cxp/console_api.py`), not only at this layer.
 
-Convencion: los PARAMETROS de las herramientas van en ingles (los nombres de
-la API v3beta1: `agent`, `flow`, `page`, `route`, `playbook`, `project`...);
-las CLAVES de la respuesta van en espanol (como en la version anterior).
-"""
+Convention: the tool PARAMETERS are in English (the names of the
+API v3beta1: `agent`, `flow`, `page`, `route`, `playbook`, `project`...);
+the response CLAVES are in Spanish (as in the previous version)."""
 from __future__ import annotations
 
 import copy
-import re
 import sys
 import time
 from pathlib import Path
@@ -57,7 +55,7 @@ except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _McpServer
 
 from cxp.config import load_config
-from cxp.console_api import ConsoleApi
+from cxp.console_api import LOCACIONES_CONOCIDAS, ConsoleApi
 from cxp.console_fields import set_field
 from cxp.gaps import CATALOGO_MEDIDO, load_schema_index, scan_agent
 from cxp.guard import (
@@ -79,10 +77,10 @@ mcp = _McpServer("cx-playbook")
 CFG = load_config()
 
 # ---------------------------------------------------------------------------
-# UNA sola sesion HTTP para TODO el servidor (leccion 2026-11-06: "conexion
-# TLS reutilizada por hilo"). Antes se creaba una `ConsoleApi` por llamada ->
-# un handshake TLS (0,66 s medido) en cada peticion del MCP: 2,66 s por
-# llamada frente a 0,50 s con keep-alive.
+# A single HTTP session for ALL the server (lesson 2026-11-06: "one reused
+# TLS connection per thread"). Previously one `ConsoleApi` was created per call ->
+# one TLS handshake (0.66 s measured) on every MCP request: 2.66 s per
+# call versus 0.50 s with keep-alive.
 # ---------------------------------------------------------------------------
 _HTTP = Session(timeout=CFG.socket_timeout, maxseg=CFG.tcp_maxseg,
                 retries=CFG.http_retries, connect_timeout=CFG.connect_timeout)
@@ -111,7 +109,7 @@ def _resolve_agent(agent: str) -> str:
 
 
 def _resolve_flow(cons: ConsoleApi, agent_id: str, flow: str, project: str = "") -> str:
-    """id del flow por uuid o displayName (catalogo cacheado)."""
+    """flow id by uuid or displayName (cached catalog)."""
     if not flow:
         return ""
     if _looks_like_uuid(flow):
@@ -119,8 +117,8 @@ def _resolve_flow(cons: ConsoleApi, agent_id: str, flow: str, project: str = "")
     by_display, _ = cons.flow_index(agent_id, project)
     if flow in by_display:
         return by_display[flow]
-    # El catalogo puede estar viejo (un flow creado hace un momento):
-    # se refresca y se reintenta UNA vez.
+    # The catalog may be stale (a flow created a moment ago):
+    # it is refreshed and retried ONCE.
     by_display, _ = cons.flow_index(agent_id, project, force=True)
     if flow in by_display:
         return by_display[flow]
@@ -129,7 +127,7 @@ def _resolve_flow(cons: ConsoleApi, agent_id: str, flow: str, project: str = "")
 
 def _resolve_page(cons: ConsoleApi, agent_id: str, flow_id: str, page: str,
                   project: str = "") -> str:
-    """id de la pagina por uuid o displayName (catalogo cacheado)."""
+    """Page id by uuid or displayName (cached catalog)."""
     if not page:
         return ""
     if _looks_like_uuid(page):
@@ -145,13 +143,13 @@ def _resolve_page(cons: ConsoleApi, agent_id: str, flow_id: str, page: str,
 
 def _resolve_playbook(cons: ConsoleApi, agent_id: str, playbook: str,
                       project: str = "") -> tuple[str, str]:
-    """(id, displayName) del playbook destino (catalogo cacheado)."""
+    """(id, displayName) of the target playbook (cached catalog)."""
     by_display, by_id = cons.playbook_index(agent_id, project)
     if playbook in by_display:
         return by_display[playbook], playbook
     if _looks_like_uuid(playbook) and playbook in by_id:
         return playbook, by_id[playbook]
-    # Catalogo viejo -> refresco y reintento UNA vez.
+    # Old catalog -> refresh and retry ONCE.
     by_display, by_id = cons.playbook_index(agent_id, project, force=True)
     if playbook in by_display:
         return by_display[playbook], playbook
@@ -164,7 +162,7 @@ def _resolve_playbook(cons: ConsoleApi, agent_id: str, playbook: str,
 
 
 def _playbook_names(cons: ConsoleApi, agent_id: str, project: str = "") -> dict[str, str]:
-    """id -> displayName de los playbooks (para etiquetar los destinos)."""
+    """id -> displayName of the playbooks (to label the targets)."""
     return cons.playbook_index(agent_id, project)[1]
 
 
@@ -173,8 +171,10 @@ def _playbook_resource(agent_id: str, playbook_id: str, project: str = "") -> st
             f"/agents/{agent_id}/playbooks/{playbook_id}")
 
 
-def _resource_name(agent_id: str, project: str, *parts: str) -> str:
-    base = f"projects/{project}/locations/{CFG.location}/agents/{agent_id}"
+def _resource_name(agent_id: str, project: str, *parts: str,
+                  location: str = "") -> str:
+    loc = location or CFG.location
+    base = f"projects/{project}/locations/{loc}/agents/{agent_id}"
     for p in parts:
         if p:
             base += "/" + p
@@ -188,7 +188,7 @@ def _agent_of(name: str) -> str:
 
 def _destino_maps(cons: ConsoleApi, agent_id: str, flow_id: str,
                   project: str) -> tuple[dict, dict]:
-    """(id->displayName de paginas, id->displayName de flows) para leer destinos."""
+    """(id->displayName of pages, id->displayName of flows) to read targets."""
     pages: dict[str, str] = {}
     flows: dict[str, str] = {}
     try:
@@ -203,7 +203,7 @@ def _destino_maps(cons: ConsoleApi, agent_id: str, flow_id: str,
 
 
 def _destino_actual(ruta: dict, pbs_inv: dict, pages: dict, flows: dict) -> dict:
-    """Destino ACTUAL de una ruta: {tipo, campo, ref, nombre}."""
+    """Current target of a route: {tipo, campo, ref, nombre}."""
     for campo, etiqueta in (("targetPlaybook", "playbook"), ("targetPage", "pagina"),
                             ("targetFlow", "flow")):
         val = ruta.get(campo)
@@ -242,12 +242,12 @@ def _err(exc: Exception) -> dict:
 
 
 def _agent_from_path(path: str) -> tuple[str, str]:
-    """(proyecto, agente) de un path/URL (delega en `cxp.guard`)."""
+    """(project, agent) of a path/URL (delegates to `cxp.guard`)."""
     return agent_from_path(path)
 
 
 def _guard_path(path: str, verb: str) -> None:
-    """Aplica el permiso del agente que aparece en el path de la peticion."""
+    """Apply the agent permission that appears in the request path."""
     project, agent = _agent_from_path(path)
     if not agent:
         return
@@ -258,56 +258,68 @@ def _guard_path(path: str, verb: str) -> None:
 
 
 def _resolve_path(path: str, name: str, parent: str, params: dict | None,
-                  query: dict | None, project: str, agent: str) -> tuple[str, dict]:
-    """(path relativo a la version, query) de una peticion.
+                  query: dict | None, project: str, agent: str,
+                  version: str = "", location: str = "") -> tuple[str, dict]:
+    """(path relative to the version, query) of a request.
 
-    Es la mitad "path" de `_build_url`, aparte, para poder reutilizarla en el
-    endpoint `/batch` (que lleva sus propias URLs dentro del multipart).
-    """
-    values: dict[str, Any] = dict(params or {})
-    if name:
-        values["name"] = name
-    if parent:
-        values["parent"] = parent
-    if agent and "agent" not in values:
-        values["agent"] = agent
-    p = path
-    if not p.startswith("projects/"):
-        p = f"projects/{project}/locations/{CFG.location}/{p}"
-    if "{agent}" in p and not values.get("agent"):
-        values["agent"] = agent or CFG.default_agent
-    for k, v in values.items():
-        p = p.replace("{" + k + "}", str(v))
-    leftovers = re.findall(r"\{[A-Za-z0-9_.]+\}", p)
-    if leftovers:
-        raise MirrorError(f"faltan parametros para el path: {sorted(set(leftovers))}")
+    It is the "path" half of `_build_url`, kept separate so it can be reused in the
+    `/batch` endpoint (which carries its own URLs inside the multipart).
+
+    Route resolution (absolute, relative, with version) lives in
+    `cxp.endpoint`: it is the same rule used by `cx_api` and the batch."""
+    from cxp.endpoint import PathError, resolve_path
+    try:
+        p, _version_final, extra = resolve_path(
+            path, version=version, project=project,
+            location=location or CFG.location,
+            name=name, parent=parent, params=params,
+            agent=agent or CFG.default_agent,
+        )
+    except PathError as exc:
+        raise MirrorError(str(exc)) from exc
     q = {k: v for k, v in (query or {}).items() if v is not None}
+    q.update({k: v for k, v in extra.items() if v is not None})
     return p, q
 
 
 def _build_url(path: str, name: str, parent: str, params: dict | None,
-               query: dict | None, project: str, agent: str) -> str:
-    """URL a partir de una plantilla de path relativa o absoluta."""
+               query: dict | None, project: str, agent: str,
+               version: str = "", location: str = "") -> str:
+    """URL from a relative or absolute path template."""
     from urllib.parse import urlencode
 
-    p, q = _resolve_path(path, name, parent, params, query, project, agent)
-    q = {"key": CFG.api_key, **q}
-    return f"https://dialogflow.clients6.google.com/{CFG.api_version}/{p}?{urlencode(q)}"
+    from cxp.endpoint import PathError, resolve_path
+
+    try:
+        p, version_final, extra = resolve_path(
+            path, version=version, project=project,
+            location=location or CFG.location,
+            name=name, parent=parent, params=params,
+            agent=agent or CFG.default_agent,
+        )
+    except PathError as exc:
+        raise MirrorError(str(exc)) from exc
+    q = {"key": CFG.api_key,
+         **{k: v for k, v in (query or {}).items() if v is not None},
+         **{k: v for k, v in extra.items() if v is not None}}
+    # MEASURED (2026-11-15): the host depends on the path location (for
+    # `global` the global host; for the rest, the regional host).
+    from cxp.console_api import host_de_path
+    return (f"https://{host_de_path(p)}/{version_final}/{p}?{urlencode(q)}")
 
 
 # ------------------------------------------------------------------- tools
 @mcp.tool()
 def cx_limites_api(filtro: str = "") -> dict:
-    """**Memoria del MCP**: los limites MEDIDOS de la API de Dialogflow CX.
+    """**MCP memory**: the MEASURED limits of the Dialogflow CX API.
 
-    Cada limite trae el sintoma exacto que devuelve el servidor, por que
-    ocurre y como esquivarlo. Sin argumentos: todos. `filtro`: texto libre
+    Each limit comes with the exact symptom the server returns, why it
+    occurs and how to work around it. No arguments: all. `filtro`: free text
     ("force", "playbook", "batch", "referencia"...).
 
-    Esto es lo que la API **no** documenta: el descriptor oficial dice que
-    `referencedPlaybooks` es de solo lectura y no dice nada de `force`, del
-    `/batch`, de los bucles entre playbooks ni de la latencia real.
-    """
+    This is what the API does **not** document: the official discovery doc says
+    `referencedPlaybooks` is read-only and says nothing about `force`, the
+    `/batch`, the loops between playbooks or the real latency."""
     from cxp.limits import CONSTANTES, buscar
 
     limites = buscar(filtro)
@@ -321,13 +333,12 @@ def cx_limites_api(filtro: str = "") -> dict:
 
 @mcp.tool()
 def cx_status() -> dict:
-    """Estado del MCP: configuracion, permisos por agente y salud del backend.
+    """Status of MCP: configuration, per-agent permissions and backend health.
 
-    Devuelve de donde salio la configuracion, si estan las 5 cookies
-    obligatorias, la version del proto en uso, la **tabla de permisos** de cada
-    agente (lectura / lectura-escritura / sin acceso) y si el backend interno
-    ACEPTA la sesion (GET real).
-    """
+    Returns where the configuration came from, whether the 5 mandatory
+    cookies are present, the proto version in use, the **permission table** of each
+    agent (read / lectura-escritura / no access) and whether the internal backend
+    ACCEPTS the session (real GET)."""
     out: dict[str, Any] = {
         "proyecto": CFG.project or None,
         "location": CFG.location,
@@ -385,20 +396,23 @@ def cx_status() -> dict:
 
 
 @mcp.tool()
-def cx_discover(filter: str = "", method: str = "", project: str = "") -> dict:
-    """El mapa de la API que refleja este MCP (discovery doc de v3beta1).
+def cx_discover(filter: str = "", method: str = "", project: str = "",
+                version: str = "") -> dict:
+    """The API map that this MCP reflects (v3beta1 discovery doc).
 
-    Sin argumentos: todos los recursos con sus metodos (162 en v3beta1).
-    `filter`: subcadena que filtra por recurso o metodo ("flows", "playbook"...).
-    `method`: detalle de UN metodo (id del discovery, p. ej. "agents.flows.train").
-    `project`: si se da, muestra que agentes hay en ese proyecto.
-    """
+    No arguments: all resources with their methods (162 in v3beta1).
+    `filter`: substring that filters by resource or method ("flows", "playbook"...).
+    `method`: detail of ONE method (discovery id, e.g. "agents.flows.train").
+    `project`: if given, shows which agents there are in that project.
+    `version`: proto version ("v3beta1", "v3alpha1", "v3", "v2beta1"). The
+        backend serves all four with the same descriptor: v3beta1 is the
+        superset (162 methods), v3alpha1 has only 8."""
     mir = _mirror()
     try:
         if method:
-            return {"metodo": mir.describe(method)}
+            return {"metodo": mir.describe(method, version)}
 
-        idx = mir.index()
+        idx = mir.index(version)
         rows: list[dict] = []
         for mid, spec in sorted(idx.items()):
             if filter and filter.lower() not in mid.lower():
@@ -413,7 +427,7 @@ def cx_discover(filter: str = "", method: str = "", project: str = "") -> dict:
                 ),
             })
         out = {
-            "api_version": CFG.api_version,
+            "api_version": version or CFG.api_version,
             "total_metodos": len(idx),
             "filtro": filter or None,
             "metodos": rows,
@@ -437,22 +451,38 @@ def cx_discover(filter: str = "", method: str = "", project: str = "") -> dict:
 @mcp.tool()
 def cx_api(method: str = "", path: str = "", name: str = "", parent: str = "",
            params: dict | None = None, body: dict | None = None,
-           query: dict | None = None, project: str = "", agent: str = "") -> dict:
-    """Llamada GENERICA a la API: cualquier metodo de v3beta1, 1:1.
+           query: dict | None = None, project: str = "", agent: str = "",
+           version: str = "", location: str = "") -> dict:
+    """Call GENERIC to the API: any method, 1:1, in any version.
 
-    `method`: id del discovery ("agents.flows.list", "agents.playbooks.patch",
-    "agents.sessions.detectIntent"...) o un verbo HTTP ("GET", "POST"...).
-    `path`: plantilla de path ("agents/{agent}/flows/{flow}") cuando `method` es
-    un verbo HTTP. Admite `{name}`, `{parent}` y `{...}` sueltos.
-    `name`/`parent`: nombres completos de recurso
-    ("projects/p/locations/l/agents/a/flows/f"). Con `agent` y `project` se
-    puede abreviar `parent`.
-    `params`: valores de los huecos de la plantilla.
-    `body`: cuerpo JSON (POST/PATCH).
-    `query`: parametros de query extra (updateMask, languageCode, pageSize...).
+    `method`: discovery id ("agents.flows.list", "agents.playbooks.patch",
+    "agents.sessions.detectIntent"...) or an HTTP verb ("GET", "POST"...).
+    `path`: path template ("agents/{agent}/flows/{flow}") when `method` is
+    an HTTP verb. It accepts `{name}`, `{parent}` and loose `{...}`.
+    `name`/`parent`: full resource names
+    ("projects/p/locations/l/agents/a/flows/f"). With `agent` and `project`,
+    `parent` can be abbreviated.
+    `params`: values for the holes of the template.
+    `body`: JSON body (POST/PATCH).
+    `query`: extra query parameters (updateMask, languageCode, pageSize...).
+    `version`: proto version ("v3beta1", "v3alpha1", "v3", "v2beta1").
+        By default, the one of `CXP_API_VERSION`. **It can also be put in the
+        path itself**: "v3alpha1/projects/p/...".
+    `location`: Dialogflow CX location ("global", "us-central1"...). By
+        default, `CXP_LOCATION`. **Measured (2026-11-15): every location has its
+        own host** (`{location}-dialogflow.clients6.google.com`, and
+        `dialogflow.clients6.google.com` for `global`), and the global host does
+        NOT serve another location (400 *"to find the correct endpoint"*).
 
-    Respuesta: el JSON crudo del backend.
-    """
+    Paths (one single rule, the same for all):
+      * "agents/{agent}/flows"      -> RELATIVE: `projects/{project}/locations/{location}/`
+                                       is prepended
+      * "projects/p/agent/visibility" -> ABSOLUTE: it already carries the project
+      * "/users/me/userSettings/recentProjects" -> ABSOLUTE FROM THE ROOT
+        (this is how endpoints that do not hang off a project are reached)
+      * "v3alpha1/..." -> it also pins the version of the call
+
+    Response: the backend's raw JSON."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     mir = _mirror()
@@ -463,9 +493,10 @@ def cx_api(method: str = "", path: str = "", name: str = "", parent: str = "",
             verb = method.upper()
             if not path:
                 return {"error": "con un verbo HTTP hace falta `path`"}
-            url = _build_url(path, name, parent, params, query, proj, agent)
+            url = _build_url(path, name, parent, params, query, proj, agent,
+                             version=version, location=location)
         elif method:
-            spec = mir.spec(method)
+            spec = mir.spec(method, version)
             verb = spec.get("httpMethod") or "GET"
             p = dict(params or {})
             if name:
@@ -473,8 +504,10 @@ def cx_api(method: str = "", path: str = "", name: str = "", parent: str = "",
             if parent:
                 p["parent"] = parent
             if not p.get("parent"):
-                p["parent"] = _resource_name(agent or _agent_of(p.get("name") or ""), proj)
-            url, verb = mir.url(method, params=p)
+                p["parent"] = _resource_name(
+                    agent or _agent_of(p.get("name") or ""), proj,
+                    location=location)
+            url, verb = mir.url(method, params=p, version=version)
         else:
             return {"error": "falta `method`"}
 
@@ -494,21 +527,20 @@ def cx_api(method: str = "", path: str = "", name: str = "", parent: str = "",
 
 @mcp.tool()
 def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
-    """Ejecuta N llamadas a la API en UNA sola peticion HTTP (endpoint `/batch`).
+    """Run N calls to API in a SINGLE HTTP request (endpoint `/batch`).
 
-    Cada elemento de `requests`:
+    Each element of `requests`:
         {"method": "POST", "path": "agents/{agent}/flows", "body": {...},
          "query": {...}, "agent": "<uuid>", "params": {...}}
 
-    `method` admite un verbo HTTP o un id del discovery ("agents.flows.create").
-    La **guarda se aplica sub-peticion a sub-peticion**: un batch que mezcle
-    agentes de lectura y escritura se evalua cada uno por separado (nadie se
-    cuela por el batch).
+    `method` accepts an HTTP verb or a discovery id ("agents.flows.create").
+    The **guard is applied sub-request to sub-request**: a batch mixing
+    read and write agents is evaluated one by one (nobody slips
+    through via the batch).
 
-    Devuelve los resultados en el MISMO orden de entrada, con su codigo HTTP,
-    y el tiempo total del viaje. Es la via rapida para el trabajo en bloque:
-    en vez de N viajes de ida y vuelta (cada uno ~0,5 s de latencia), uno.
-    """
+    Returns the results in the SAME input order, with their HTTP code,
+    and the total round-trip time. It is the fast path for bulk work:
+    instead of N round trips (each ~0.5 s of latency), one."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     reqs = list(requests or [])
@@ -529,7 +561,7 @@ def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
                 items.append({"method": method, "path": p, "query": q,
                               "body": item.get("body")})
                 continue
-            # id del discovery: se resuelve a su path y se reutiliza el verbo
+            # discovery id: resolves to its path and the verb is reused
             values = dict(item.get("params") or {})
             if item.get("name"):
                 values["name"] = item["name"]
@@ -551,8 +583,8 @@ def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
         except HttpStatusError as exc:
             if exc.status != 404:
                 raise
-            # El backend interno NO implementa `/batch` (404). Se cae a las
-            # mismas sub-peticiones en HILOS: es lo que el batch pretendia.
+            # The internal backend does NOT implement `/batch` (404). It falls back to the
+            # same sub-peticiones in THREADS: this is what the batch intended.
             out = cons.batch_secundario(items, project=proj)
             modo = "hilos (/batch no existe en este backend)"
         ms = (time.perf_counter() - t0) * 1000
@@ -581,16 +613,15 @@ def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
 @mcp.tool()
 def cx_net_probe(repeticiones: int = 5, path: str = "agents/{agent}",
                  agent: str = "", project: str = "", paralelo: int = 1) -> dict:
-    """Diagnostico de red: **donde se va el tiempo** de cada peticion.
+    """Network diagnostics: **where the time goes** for each request.
 
-    Hace `repeticiones` GET del mismo recurso y devuelve, peticion a peticion,
-    el reparto entre envio, espera de cabeceras y cuerpo, y si la conexion se
-    reutilizo. Con `paralelo` > 1 las peticiones salen a la vez (hilos distintos
-    -> una conexion TLS cada uno).
+    Makes `repeticiones` GET of the same resource and returns, request by request,
+    the split between send, header wait and body, and whether the connection was
+    reused. With `paralelo` > 1 the requests go out at once (separate threads
+    -> one TLS connection each).
 
-    Sirve para distinguir "tarda la red" de "tarda el backend" y para medir el
-    efecto de cualquier cambio en el transporte.
-    """
+    Useful to tell "the network is slow" from "the backend is slow" and to measure the
+    effect of any change in the transport."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     cons = _api()
@@ -625,27 +656,26 @@ def cx_net_probe(repeticiones: int = 5, path: str = "agents/{agent}",
 def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
                    lecturas: int = 8, escrituras: int = 2,
                    verificar: bool = True, modo: str = "aplicar") -> dict:
-    """Clona un agente 1:1: **limpia el destino** y **recrea el original** dentro.
+    """Clone an agent 1:1: **clean the target** and **recreate the original** inside it.
 
-    `origen` = agente de solo lectura (la fuente). `destino` = agente escribible
-    (nuestra copia). La guarda se aplica en la capa baja: es imposible tocar
-    el original con esta herramienta.
+    `origen` = read-only agent (the source). `destino` = writable agent
+    (our copy). The guard is enforced at the low layer: it is impossible to touch
+    the original with this tool.
 
-    Fases (con su tiempo):
-      1. `lectura`  - snapshot del original (lecturas EN PARALELO).
-      2. `borrado`  - se borran todos los elementos del destino. Los borrados
-                      independientes van `escrituras` en paralelo (2 = optimo
-                      medido); los playbooks y los intents, en serie, porque su
-                      orden lo impone el servidor.
-      3. `creacion` - se recrea todo en orden de dependencias, remapeando los
-                      ids (los recursos del original tienen ids distintos). Va
-                      **en serie**: el backend serializa las escrituras del
-                      mismo agente.
-      4. `verificacion` - se relee el destino y se compara con el original.
+    Phases (with their timing):
+      1. `lectura`  - snapshot of the original (reads IN PARALLEL).
+      2. `borrado`  - all elements of the target are deleted. Independent
+                      deletions run `escrituras` in parallel (2 = measured optimum);
+                      playbooks and intents, in series, because their
+                      order is imposed by the server.
+      3. `creacion` - everything is recreated in dependency order, remapping
+                      the ids (the original's resources have different ids). It runs
+                      **in series**: the backend serializes writes to the
+                      same agent.
+      4. `verificacion` - the target is re-read and compared with the original.
 
-    `modo="plan"` no escribe nada: devuelve lo que se borraria y lo que se
-    crearia. `lecturas` = hilos de lectura en paralelo (8 = optimo medido).
-    """
+    `modo="plan"` writes nothing: it returns what would be deleted and what would be
+    created. `lecturas` = parallel read threads (8 = measured optimum)."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     from cxp.clone import Cloner
@@ -667,14 +697,14 @@ def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
                 "origen": src, "destino": dst,
                 "original": {k: len(v) for k, v in snap.items()
                              if isinstance(v, list)},
-                # OJO: la clave del id del destino es "destino"; los conteos
-                # van aparte (si se llaman igual, el id se pierde).
+                # NOTE: the target id key is "destino"; the counts
+                # go separately (if they share a name, the id is lost).
                 "destino_conteos": {k: len(v) for k, v in estado.items()},
                 "paginas_original": sum(len(v) for v in (snap.get("pages") or {}).values()),
                 "ms": round(clonador._t_fases.get("lectura", 0.0), 1),
             }
         if modo == "limpiar":
-            # Solo la limpieza del destino (sin tocar el original).
+            # Only the target cleanup (without touching the original).
             t0 = time.perf_counter()
             limpio = clonador.limpiar()
             return {"modo": "limpiar", "origen": src, "destino": dst,
@@ -690,32 +720,56 @@ def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
         return _err(exc)
 
 
-# --------------------------------------------------------------- tipadas
+# --------------------------------------------------------------- typed
 @mcp.tool()
-def cx_list_agents(project: str = "") -> dict:
-    """Lista los agentes del proyecto (los que la sesion puede ver)."""
+def cx_list_agents(project: str = "", location: str = "",
+                   todas_las_locations: bool = False) -> dict:
+    """List the project's agents (those the session can see).
+
+    - project: project (default, `CXP_PROJECT`).
+    - location: location (default, `CXP_LOCATION`).
+    - todas_las_locations: also list in the remaining locations, as the
+      console does (which calls each one's regional host). MEASURED
+      (2026-11-15): each location has its own host
+      (`{location}-dialogflow.clients6.google.com`); the global host does NOT work
+      for another location."""
     try:
         cons = _api()
-        agents = cons.list_agents(project)
-        rows = []
-        for a in agents:
-            parts = a["name"].split("/")
-            rows.append({
-                "id": parts[-1],
-                "displayName": a.get("displayName"),
-                "proyecto": parts[1],
-                "permiso": agent_level(parts[1], parts[-1], CFG),
-                "startFlow": (a.get("startFlow") or "").split("/")[-1],
-                "startPlaybook": (a.get("startPlaybook") or "").split("/")[-1],
-            })
-        return {"proyecto": project or CFG.project, "total": len(rows), "agentes": rows}
+        locations = [location or CFG.location]
+        if todas_las_locations:
+            locations = LOCACIONES_CONOCIDAS
+        rows: list[dict] = []
+        errores: list[dict] = []
+        for loc in locations:
+            try:
+                agents = cons.list_agents(project, location=loc)
+            except Exception as exc:
+                errores.append({"location": loc, "error": str(exc)[:200]})
+                continue
+            for a in agents:
+                parts = a["name"].split("/")
+                rows.append({
+                    "id": parts[-1],
+                    "displayName": a.get("displayName"),
+                    "proyecto": parts[1],
+                    "location": parts[3] if len(parts) > 3 else loc,
+                    "permiso": agent_level(parts[1], parts[-1], CFG),
+                    "startFlow": (a.get("startFlow") or "").split("/")[-1],
+                    "startPlaybook": (a.get("startPlaybook") or "").split("/")[-1],
+                })
+        salida = {"proyecto": project or CFG.project,
+                  "locations": locations,
+                  "total": len(rows), "agentes": rows}
+        if errores:
+            salida["errores"] = errores
+        return salida
     except Exception as exc:
         return _err(exc)
 
 
 @mcp.tool()
 def cx_get_agent(agent: str = "", project: str = "") -> dict:
-    """GET de un agente (v3beta1)."""
+    """GET of an agent (v3beta1)."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -729,7 +783,7 @@ def cx_get_agent(agent: str = "", project: str = "") -> dict:
 @mcp.tool()
 def cx_update_agent(agent: str = "", body: dict | None = None,
                     update_mask: str = "", project: str = "") -> dict:
-    """PATCH de un agente (v3beta1). Requiere permiso de escritura."""
+    """PATCH of an agent (v3beta1). Requires write permission."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -746,7 +800,7 @@ def cx_update_agent(agent: str = "", body: dict | None = None,
 
 @mcp.tool()
 def cx_list_flows(agent: str = "", project: str = "") -> dict:
-    """Lista los flows de un agente."""
+    """List the flows of an agent."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -763,7 +817,7 @@ def cx_list_flows(agent: str = "", project: str = "") -> dict:
 
 @mcp.tool()
 def cx_get_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
-    """GET de un flow (v3beta1), con su router (rutas y destinos)."""
+    """GET of a flow (v3beta1), with its router (routes and targets)."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -782,7 +836,7 @@ def cx_get_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
 @mcp.tool()
 def cx_update_flow(flow: str = "", body: dict | None = None, update_mask: str = "",
                    agent: str = "", project: str = "") -> dict:
-    """PATCH de un flow (v3beta1). Requiere permiso de escritura."""
+    """PATCH of a flow (v3beta1). Requires write permission."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -798,7 +852,7 @@ def cx_update_flow(flow: str = "", body: dict | None = None, update_mask: str = 
 
 @mcp.tool()
 def cx_list_pages(flow: str = "", agent: str = "", project: str = "") -> dict:
-    """Lista las paginas de un flow."""
+    """List the pages of a flow."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -817,7 +871,7 @@ def cx_list_pages(flow: str = "", agent: str = "", project: str = "") -> dict:
 @mcp.tool()
 def cx_get_page(flow: str = "", page: str = "", agent: str = "",
                 project: str = "") -> dict:
-    """GET de una pagina (v3beta1), con sus rutas y destinos."""
+    """GET of a page (v3beta1), with its routes and targets."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -837,7 +891,7 @@ def cx_get_page(flow: str = "", page: str = "", agent: str = "",
 @mcp.tool()
 def cx_update_page(flow: str = "", page: str = "", body: dict | None = None,
                    update_mask: str = "", agent: str = "", project: str = "") -> dict:
-    """PATCH de una pagina (v3beta1). Requiere permiso de escritura."""
+    """PATCH of a page (v3beta1). Requires write permission."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -854,7 +908,7 @@ def cx_update_page(flow: str = "", page: str = "", body: dict | None = None,
 
 @mcp.tool()
 def cx_list_playbooks(agent: str = "", project: str = "") -> dict:
-    """Lista los playbooks de un agente."""
+    """List an agent's playbooks."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -872,7 +926,7 @@ def cx_list_playbooks(agent: str = "", project: str = "") -> dict:
 
 @mcp.tool()
 def cx_get_playbook(playbook: str = "", agent: str = "", project: str = "") -> dict:
-    """GET de un playbook (v3beta1)."""
+    """GET of a playbook (v3beta1)."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -890,17 +944,16 @@ def cx_get_playbook(playbook: str = "", agent: str = "", project: str = "") -> d
 def cx_update_playbook(playbook: str = "", body: dict | None = None,
                        update_mask: str = "", agent: str = "",
                        project: str = "") -> dict:
-    """PATCH de un playbook (v3beta1). Requiere permiso de escritura.
+    """PATCH of a playbook (v3beta1). Requires write permission.
 
-    OJO: CX revalida el playbook entero -> sin `goal` responde
-    "Playbook goal cannot be empty". Manda el cuerpo completo.
-    """
+    NOTE: CX revalidates the entire playbook -> without `goal` it responds
+    "Playbook goal cannot be empty". Sends the full body."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
         proj = project or CFG.project
-        # Un playbook solo se escribe en un agente de CXP_AGENT_READWRITE
-        # (nuestra copia). Los agentes de referencia son de solo lectura.
+        # A playbook is only written on an CXP_AGENT_READWRITE agent
+        # (our copy). Reference agents are read-only.
         assert_playbook_writable(proj, agent_id, CFG)
         pb_id, pb_name = _resolve_playbook(cons, agent_id, playbook, proj)
         url = cons._url(f"{cons._base(proj)}/agents/{agent_id}/playbooks/{pb_id}",
@@ -916,11 +969,10 @@ def cx_update_playbook(playbook: str = "", body: dict | None = None,
 @mcp.tool()
 def cx_list_children(agent: str = "", collection: str = "intents",
                      project: str = "") -> dict:
-    """Lista una coleccion hija del agente.
+    """List a child collection of the agent.
 
     `collection`: intents | entityTypes | tools | webhooks | transitionRouteGroups |
-    generators | changelogs | conversations
-    """
+    generators | changelogs | conversations"""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -952,7 +1004,7 @@ def cx_list_children(agent: str = "", collection: str = "intents",
 @mcp.tool()
 def cx_get_conversation(conversation: str = "", agent: str = "",
                         project: str = "") -> dict:
-    """GET de una conversacion (v3beta1): la traza real del agente."""
+    """GET of a conversation (v3beta1): the agent's actual trace."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -966,18 +1018,24 @@ def cx_get_conversation(conversation: str = "", agent: str = "",
 
 @mcp.tool()
 def cx_detect_intent(text: str = "", session_id: str = "", agent: str = "",
-                     project: str = "", params: dict | None = None) -> dict:
-    """sessions.detectIntent (v3beta1) contra un agente.
+                     project: str = "", params: dict | None = None,
+                     language_code: str = "es") -> dict:
+    """sessions.detectIntent (v3beta1) against an agent.
 
-    `text`: lo que dice el usuario. `session_id`: id de sesion (si no, se
-    genera). `params`: parametros de sesion (van en el primer turno).
+    `text`: what the user says. `session_id`: session id (if absent, it is
+    generated). `params`: session parameters (sent in the first turn).
+    `language_code`: turn language (default, `es`).
 
-    OJO (leccion 2026-11-05): contra algunos agentes el turno **vence en
-    ~241 s** (el deadline es del servidor, HTTP 408) cuando el backend que
-    consume las tools esta frio. Aqui el presupuesto es de 300 s: subirlo mas
-    no arregla un 408. Si falla, **reintenta EN SERIE y con pausa (~90 s)**,
-    nunca en paralelo.
-    """
+    NOTE (measured 2026-11-13): the backend **requires `queryInput.languageCode`**
+    ("Field 'query_input.language_code' is missing" -> HTTP 400). The language does NOT
+    go inside `queryInput.text.languageCode` (that form is silently dropped
+    and the server responds 400).
+
+    NOTE (lesson 2026-11-05): against some agents the turn **expires at
+    ~241 s** (the deadline is the server's, HTTP 408) when the backend that
+    consumes the tools is cold. Here the budget is 300 s: raising it further
+    does not fix a 408. If it fails, **retry IN SERIES and with a pause (~90 s)**,
+    never in parallel."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -986,7 +1044,9 @@ def cx_detect_intent(text: str = "", session_id: str = "", agent: str = "",
         sid = session_id or f"mcp-{abs(hash(text)) % (10 ** 12)}"
         url = cons._url(f"{cons._base(proj)}/agents/{agent_id}/sessions/{sid}"
                         f":detectIntent", alt="json")
-        body: dict[str, Any] = {"queryInput": {"text": {"text": text}}}
+        body: dict[str, Any] = {
+            "queryInput": {"text": {"text": text}, "languageCode": language_code},
+        }
         if params:
             body["queryParams"] = {"parameters": params}
         data = cons.request("POST", url, body=body, timeout=300.0)
@@ -997,7 +1057,7 @@ def cx_detect_intent(text: str = "", session_id: str = "", agent: str = "",
 
 @mcp.tool()
 def cx_train_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
-    """Entrena un flow (flows:{flow}:train)."""
+    """Train a flow (flows:{flow}:train)."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -1014,7 +1074,7 @@ def cx_train_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
 
 @mcp.tool()
 def cx_validate_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
-    """Valida un flow (flows:{flow}:validate)."""
+    """Validates a flow (flows:{flow}:validate)."""
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
@@ -1028,7 +1088,7 @@ def cx_validate_flow(flow: str = "", agent: str = "", project: str = "") -> dict
         return _err(exc)
 
 
-# ------------------------------------------------- EL AGREGADO: playbook destino
+# ------------------------------------------------- THE AGGREGATE: target playbook
 @mcp.tool()
 def cx_set_route_playbook(
     agent: str = "",
@@ -1039,26 +1099,25 @@ def cx_set_route_playbook(
     dry_run: bool = True,
     project: str = "",
 ) -> dict:
-    """Pone un PLAYBOOK como destino de UNA transition route DE PAGINA.
+    """Sets a PLAYBOOK as the target of ONE transition route OF PAGE.
 
-    Es lo que la API publica NO puede hacer: ahi `TransitionRoute.target` solo
-    admite pagina o flow, y un `targetPlaybook` se descarta en silencio. Este
-    MCP escribe contra el backend interno de la consola (mismo proto que usa la
-    UI), en ~1 s. **Medido: el runtime ejecuta el playbook.**
+    It is what the API publishes CANNOT do: there `TransitionRoute.target` only
+    accepts page or flow, and a `targetPlaybook` is dropped silently. This
+    MCP writes against the console's internal backend (same proto the
+    UI uses), in ~1 s. **Measured: the runtime executes the playbook.**
 
-    - agent:   id del agente (por defecto, `CXP_DEFAULT_AGENT`).
-    - flow:    id o displayName del flow (por defecto, el primero del agente).
-    - page:    id o displayName de la pagina (por defecto, la primera).
-    - route:   uuid de la ruta, su condicion EXACTA, o su indice (0-based).
-               **Si se omite, la herramienta solo LEE** y devuelve el estado
-               actual de la pagina.
-    - playbook: displayName o id del playbook destino (por defecto, NO cambia).
-    - dry_run: True (por defecto) = no escribe; devuelve el plan.
+    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - flow:    flow id or displayName (default, the agent's first one).
+    - page:    page id or displayName (default, the first one).
+    - route:   route uuid, its EXACT condition, or its index (0-based).
+               **If omitted, the tool only READS** and returns the current
+               state of the page.
+    - playbook: displayName or id of the target playbook (default, does NOT change).
+    - dry_run: True (default) = does not write; returns the plan.
 
-    OJO: cambiar el destino **borra** `targetPage`/`targetFlow` de esa ruta
-    (son un `oneof`): si la ruta apuntaba a una pagina o a un flow, eso se
-    pierde. El `dry_run` devuelve el `aviso` con el destino que se va a perder.
-    """
+    NOTE: changing the target **erases** `targetPage`/`targetFlow` from that route
+    (they are a `oneof`): if the route pointed to a page or a flow, that is
+    lost. The `dry_run` returns the `aviso` with the target that will be lost."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     agent_id = _resolve_agent(agent)
@@ -1093,7 +1152,7 @@ def cx_set_route_playbook(
     except Exception as exc:
         return _err(exc)
 
-    # Solo lectura: se devuelve el estado actual.
+    # Read-only: the current state is returned.
     if not route:
         return {"modo": "lectura", **estado,
                 "pista": "pasa route=... y playbook=... para cambiar el destino"}
@@ -1164,30 +1223,29 @@ def cx_set_flow_route_playbook(
     dry_run: bool = True,
     project: str = "",
 ) -> dict:
-    """Pone un PLAYBOOK como destino de una transition route DEL ROUTER DE UN FLOW.
+    """Sets a PLAYBOOK as the target of a transition route of the ROUTER OF A FLOW.
 
-    **El agregado**: la API publica de Dialogflow CX no puede expresar esto.
-    En el proto publico `TransitionRoute.target` es un `oneof` con
-    `target_page` y `target_flow`: `target_playbook` NO existe y un PATCH que
-    lo envie se descarta en silencio (la ruta queda sin destino y el agente cae
-    en NO_MATCH). El backend interno de la consola SI lo conserva: el MCP
-    escribe ahi, en ~1 s, y verifica releyendo.
-    **Medido: el runtime EJECUTA el playbook cuando el destino esta aqui**
-    (prueba con un playbook de marca propia: `matchType=PLAYBOOK`,
-    `currentPlaybooks=[el playbook nuevo]` y la respuesta fue su texto).
+    **The aggregate**: the public API of Dialogflow CX cannot express this.
+    In the public proto `TransitionRoute.target` is a `oneof` with
+    `target_page` and `target_flow`: `target_playbook` does NOT exist and a PATCH that
+    sends it is silently dropped (the route is left without a target and the agent falls
+    into NO_MATCH). The console's internal backend DOES keep it: the MCP
+    writes there, in ~1 s, and verifies by re-reading.
+    **Measured: the runtime EXECUTES the playbook when the target is here**
+    (test with a custom-brand playbook: `matchType=PLAYBOOK`,
+    `currentPlaybooks=[the new playbook]` and the response was its text).
 
-    - agent:   id del agente (por defecto, `CXP_DEFAULT_AGENT`).
-    - flow:    id o displayName del flow (por defecto, el primero del agente).
-    - route:   uuid de la ruta, su condicion EXACTA, o su indice (0-based).
-               **Si se omite, la herramienta solo LEE** y devuelve el router
-               del flow con el destino de cada ruta.
-    - playbook: displayName o id del playbook destino (por defecto, NO cambia).
-    - dry_run: True (por defecto) = no escribe; devuelve el plan.
+    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - flow:    flow id or displayName (default, the agent's first one).
+    - route:   route uuid, its EXACT condition, or its index (0-based).
+               **If omitted, the tool only READS** and returns the flow's
+               router with each route's target.
+    - playbook: displayName or target playbook id (default, does NOT change).
+    - dry_run: True (default) = does not write; returns the plan.
 
-    OJO: cambiar el destino **borra** `targetPage`/`targetFlow` de esa ruta
-    (son un `oneof`): si la ruta apuntaba a una pagina o a un flow, eso se
-    pierde. El MCP avisa antes de escribir (dry_run).
-    """
+    NOTE: changing the target **erases** `targetPage`/`targetFlow` from that route
+    (they are a `oneof`): if the route pointed to a page or a flow, that is
+    lost. The MCP warns before writing (dry_run)."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     agent_id = _resolve_agent(agent)
@@ -1277,37 +1335,35 @@ def cx_set_flow_route_playbook(
 
 
 # ===========================================================================
-# LOS HUECOS DE LA API PUBLICA
+# THE GAPS OF THE API PUBLIC
 # ===========================================================================
-# La API publica v3beta1 y el backend interno de la consola sirven el MISMO
-# discovery doc, pero no el MISMO proto: el backend de la consola tiene campos
-# que la API publica ni siquiera DECLARA (y por tanto no puede leer ni
-# escribir). Eso son agujeros, y son la razón de existir de este MCP.
-#
-# `cx_gaps` los DETECTA en vivo (compara el JSON real con el esquema publico),
-# `cx_set_console_field` los ESCRIBE, y las herramientas `cx_set_*_playbook`
-# son el caso mas usado.
+# The public API and the console's internal backend serve the SAME
+# discovery doc, but not the SAME proto: the console backend has fields
+# that the public API does not even DECLARES (and therefore cannot read or
+# write). Those are gaps, and they are the reason this MCP exists
+# `cx_gaps` the live DETECTS (compares the real JSON with the public schema),
+# `cx_set_console_field` the WRITES, and the `cx_set_*_playbook` tools
+# are the most used case.
 
 _TIPOS_RECURSO = ("flow", "page", "playbook", "tool", "intent", "entityType",
                   "webhook", "generator", "transitionRouteGroup")
 
 
 def _resolve_resource_name(recurso: str, agent_id: str, proj: str) -> str:
-    """Convierte un selector de recurso en su `name` completo.
+    """Converts a resource selector into its full `name`.
 
-    Acepta:
-      * el `name` completo que devuelve la API
+    Accepts:
+      * the full `name` returned by the API
       * `flow/<id>`, `page/<flowId>/<pageId>`, `playbook/<id>`, `tool/<id>`,
         `intent/<id>`, `entityType/<id>`, `transitionRouteGroup/<id>`, ...
-      * `agent` (el propio agente)
-    """
+      * `agent` (the agent itself)"""
     recurso = (recurso or "").strip()
     if not recurso:
         return ""
     if recurso == "agent":
         return f"projects/{proj}/locations/{CFG.location}/agents/{agent_id}"
     if "/" not in recurso:
-        return recurso  # ya es un nombre completo
+        return recurso  # it is already a full name
     tipo, _, resto = recurso.partition("/")
     if tipo not in _TIPOS_RECURSO:
         return recurso
@@ -1321,28 +1377,51 @@ def _resolve_resource_name(recurso: str, agent_id: str, proj: str) -> str:
 @mcp.tool()
 def cx_gaps(agent: str = "", scope: str = "", project: str = "",
             incluir_paginas: bool = True,
-            incluir_catalogo: bool = True) -> dict:
-    """Los HUECOS de la API publica v3beta1, detectados EN VIVO.
+            incluir_catalogo: bool = True,
+            incluir_metodos: bool = True,
+            incluir_lab: bool = False,
+            max_padres: int = 5) -> dict:
+    """The GAPS of the public API v3beta1, detected LIVE.
 
-    Recorre el agente y compara cada recurso que devuelve el backend con el
-    **esquema publico** de v3beta1 (el discovery doc oficial). Todo campo que
-    el backend expone y la API publica **no declara** es un agujero: por la
-    API publica no se puede ni leer ni escribir.
+    Walks the agent and compares each resource the backend returns with the
+    **public schema** of v3beta1 (the official discovery doc). Any field the
+    backend exposes and the public API **does not declare** is a gap: through
+    the public API it can neither be read nor written.
 
-    No es una lista escrita a mano: se calcula con los datos reales, asi que
-    si la consola anade un campo nuevo, este MCP lo ve sin tocar el codigo.
+    It is not a hand-written list: it is computed from real data, so
+    if the console adds a new field, this MCP sees it without touching the code.
 
-    - agent:   id del agente (por defecto, `CXP_DEFAULT_AGENT`).
-    - scope:   filtra los huecos por esquema o por nombre de campo
-               (por ejemplo `"Tool"` o `"targetPlaybook"`). Vacio = todos.
-    - project: proyecto (por defecto, `CXP_PROJECT`).
-    - incluir_paginas: si False, no baja a las paginas de cada flow (mas rapido).
-    - incluir_catalogo: añade el catalogo MEDIDO (que huecos se pueden
-               escribir y cuales son solo lectura). Ver `cx_limites_api`.
+    The walk is **generic**: it lists ALL the collections the discovery doc
+    declares (24 in v3beta1), including nested ones (`flows.pages`,
+    `tools.versions`, `playbooks.examples`, `environments.deployments`,
+    `testCases.results`...). For nested ones the ancestor must be resolved
+    (`flows.pages` needs a flow): up to `max_padres` candidates are used,
+    so a flow without pages does not mask one that has them.
 
-    Devuelve `huecos` (lo detectado ahora), `catalogo` (lo medido) y
-    `recursos_escaneados`.
-    """
+    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - scope:   filters the gaps by schema or by field name
+               (for example `"Tool"` or `"targetPlaybook"`). Empty = all.
+    - project: project (default, `CXP_PROJECT`).
+    - incluir_paginas: if False, does not descend into each flow's pages (faster).
+    - incluir_catalogo: adds the MEASURED catalog (which gaps can be
+               written and which are read-only). See `cx_limites_api`.
+    - incluir_metodos: adds the catalog of **METHOD** gaps (endpoints
+               the console uses and that are not in any discovery doc).
+    - incluir_lab: **creates a temporary lab agent** and sweeps with it the
+               `environments*` family (`environments`, `.deployments`,
+               `.experiments`, `.continuousTestResults`,
+               `.sessions.entityTypes`), which on a normal agent cannot be
+               reached (an environment must be created, and the environment requires the
+               version of all the flows, playbooks and tools in the graph). The
+               lab agent is DELETES at the end. With this the
+               coverage reaches **24/24** collections of the discovery doc.
+    - max_padres: how many ancestors are tried as parent of a nested
+               collection (more = more coverage, more calls).
+
+    Returns `huecos` (what is detected now), `catalogo` (what is measured),
+    `recursos_escaneados`, `sin_alcanzar` (the collections that agent
+    does not have: it is not a failure of the MCP, the resource simply does not exist) and
+    `cobertura`."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     agent_id = _resolve_agent(agent)
@@ -1357,7 +1436,8 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
         return _err(exc)
     try:
         escaneo = scan_agent(cons, agent_id, proj, idx=idx,
-                             incluir_paginas=incluir_paginas)
+                             incluir_paginas=incluir_paginas,
+                             max_padres=max_padres)
     except PermissionDeniedError as exc:
         return {"error": str(exc), "agente": agent_id}
     except Exception as exc:
@@ -1369,6 +1449,10 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
         huecos = [h for h in huecos
                   if s in (h.get("esquema") or "").lower() or s in h["campo"].lower()]
 
+    con_datos = escaneo.get("colecciones_escaneadas") or []
+    alcanzables = escaneo.get("colecciones_alcanzables") or []
+    total_col = escaneo.get("colecciones") or 0
+    sin_alc = escaneo.get("sin_alcanzar") or []
     salida: dict[str, Any] = {
         "agente": agent_id,
         "proyecto": proj,
@@ -1376,6 +1460,15 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
         "recursos_escaneados": escaneo.get("recursos_escaneados"),
         "total_huecos": len(huecos),
         "huecos": huecos,
+        "cobertura": {
+            "colecciones_del_descriptor": total_col,
+            "colecciones_alcanzadas": len(alcanzables),
+            "colecciones_con_datos": len(con_datos),
+            "colecciones_no_alcanzadas": len(sin_alc),
+            "detalle_alcanzadas": alcanzables,
+            "detalle_con_datos": con_datos,
+        },
+        "sin_alcanzar": sin_alc,
         "nota": ("Un hueco es un campo que el backend de la consola expone y "
                  "la API publica NO declara: por la API publica no se puede "
                  "ni leer ni escribir. Los que se pueden ESCRIBIR estan "
@@ -1388,42 +1481,200 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
             cat = [c for c in cat if s in c["campo"].lower()
                    or any(s in r.lower() for r in c["recursos"])]
         salida["catalogo"] = cat
+    if incluir_metodos:
+        from cxp.console_endpoints import METODOS_POR_VERSION, catalogo_metodos
+        salida["huecos_de_metodo"] = catalogo_metodos()
+        salida["metodos_por_version"] = METODOS_POR_VERSION
+
+    if incluir_lab:
+        # The `environments*` family is only reachable with an environment, and an
+        # environment cannot be created in the work agent (its graph uses a
+        # system tool that cannot be versioned). It is swept in a temporary
+        # lab agent, which is deleted when finished.
+        from cxp.lab import barrer_entornos
+        lab = barrer_entornos(cons, CFG, idx, proj)
+        lab_huecos: list[dict[str, Any]] = []
+        lab_alcanzadas: list[str] = []
+        for clave, med in (lab.get("mediciones") or {}).items():
+            if med.get("estado") != "ok":
+                continue
+            lab_alcanzadas.append(clave)
+            for h in (med.get("envoltorio") or []) + (med.get("items") or []):
+                fila = dict(h)
+                fila["origen"] = "laboratorio"
+                lab_huecos.append(fila)
+        if scope:
+            s = scope.lower()
+            lab_huecos = [h for h in lab_huecos
+                          if s in (h.get("esquema") or "").lower()
+                          or s in h["campo"].lower()]
+        huecos.extend(lab_huecos)
+        alcanzables.extend(k for k in lab_alcanzadas if k not in alcanzables)
+        alcanzables = sorted(set(alcanzables))
+        sin_alc = [x for x in sin_alc
+                   if x.get("coleccion") not in lab_alcanzadas]
+        salida["total_huecos"] = len(huecos)
+        salida["huecos"] = huecos
+        salida["cobertura"].update({
+            "colecciones_alcanzadas": len(alcanzables),
+            "colecciones_no_alcanzadas": len(sin_alc),
+            "detalle_alcanzadas": alcanzables,
+        })
+        salida["sin_alcanzar"] = sin_alc
+        salida["laboratorio"] = {
+            "agente_temporal": lab.get("agente"),
+            "mediciones": lab.get("mediciones"),
+            "errores": lab.get("errores"),
+            "nota": ("El agente de laboratorio se crea y se BORRA dentro de "
+                     "esta llamada: no queda nada."),
+        }
     return salida
+
+
+@mcp.tool()
+def cx_proto_interno(scope: str = "") -> dict:
+    """The gaps of FIELD in the console's **internal proto** (not declared
+    by the public API v3beta1).
+
+    `cx_gaps` computes the gaps over the agent's real data
+    (and therefore only sees what that agent has). This tool gives the list
+    **systematically**: it is extracted from the internal proto carried by the console
+    bundle and cross-checked against the public discovery doc, so it also sees
+    what the agent does NOT have.
+
+    Each field's state says whether the backend **accepts** it:
+    "escribible" (measured: write and read back), "ignorado" (the backend does NOT
+    know it: it ignores it silently), "descartado" (it knows it but empties it),
+    "derivado" (the server computes it), "solo_entrada" (it is accepted in the
+    request but cannot be read), "no_aceptado" (the backend knows it but rejects
+    the value) or "no_probado" (the internal proto has it, its write has not been
+    tested).
+
+    - scope: filters by schema or by field name ("FormParameter",
+              "ssml"...). Empty = all.
+    """
+    from cxp.proto_interno import catalogo_proto_interno, resumen
+    cat = catalogo_proto_interno()
+    if scope:
+        s = scope.lower()
+        cat = [c for c in cat
+               if s in c["esquema"].lower()
+               or any(s in campo.lower() for campo in c["campos"])]
+    salida = {"total_esquemas": len(cat), "huecos": cat}
+    if not scope:
+        salida["resumen"] = resumen()
+    salida["nota"] = (
+        "La lista sale del proto interno que lleva el bundle de la consola "
+        "(1536 clases) contrastado con el discovery doc publico v3beta1 "
+        "(709 schemas). Los estados estan TODOS MEDIDOS escribiendo y "
+        "releyendo en un agente de laboratorio temporal: el backend falla con "
+        "el TIPO cuando el campo existe ('Invalid value at ... (TYPE_BOOL)') y "
+        "ignora en silencio los nombres que no conoce.")
+    return salida
+
+
+@mcp.tool()
+def cx_endpoints_consola(endpoint: str = "", agent: str = "",
+                          project: str = "", version: str = "",
+                          query: dict | None = None) -> dict:
+    """The endpoints used by the CONSOLE and that are **not in any descriptor**.
+
+    The public discovery doc and the internal backend one are **the same
+    document** (measured: 669 652 bytes each, same canonical md5
+    `29adf74f...`; the only thing that changes is the order of the JSON keys). That is
+    to say: no "falta" any method in the descriptor. What is missing are the
+    endpoints that the UI uses and that are not part of the public API: the
+    system entity types, who else is using the agent, which models are
+    available, which projects you have opened, the conversation profiles of the
+    old model...
+
+    Without arguments: the MEASURED catalog of those endpoints (with their real
+    response). With `endpoint=<id>`: **it is called** and the response is returned.
+
+    - endpoint: catalog id ("systemEntityTypes.list", "agents.currentUsers",
+               "users.recentProjects", "agents.listAvailableModels",
+               "agents.getSupportedLanguages", "agent.visibility",
+               "conversationProfiles.list", "locationSettings.get").
+    - agent:   agent (for those that need it). By default,
+               `CXP_DEFAULT_AGENT`.
+    - project: project (by default, `CXP_PROJECT`).
+    - version: if given, forces the version (otherwise, the catalog one).
+    - query:   extra query parameters.
+
+    Examples:
+      cx_endpoints_consola()                                     -> the catalog
+      cx_endpoints_consola(endpoint="systemEntityTypes.list")    -> the call
+      cx_endpoints_consola(endpoint="agents.listAvailableModels") -> models
+    """
+    from cxp.console_endpoints import HUECOS_METODO
+    catalogo = [dict(h) for h in HUECOS_METODO]
+    if not endpoint:
+        return {"total": len(catalogo), "endpoints": catalogo,
+                "nota": ("Los endpoints se alcanzan con `cx_api` poniendo la "
+                         "version y la ruta; esta herramienta los llama "
+                         "directamente.")}
+    if not CFG.credentials_ok():
+        return _sin_credenciales()
+
+    elegido = next((h for h in catalogo if h["id"] == endpoint), None)
+    if elegido is None:
+        return {"error": f"endpoint desconocido: {endpoint!r}",
+                "disponibles": [h["id"] for h in catalogo]}
+
+    agent_id = _resolve_agent(agent)
+    proj = project or CFG.project
+    cons = _api()
+    ver = version or elegido.get("version") or "v3alpha1"
+    ruta = (elegido.get("path") or "")
+    ruta = (ruta.replace("{project}", proj)
+                .replace("{location}", CFG.location)
+                .replace("{agent}", agent_id or CFG.default_agent))
+    # Routes that do not hang off `projects/` are absolute from the root.
+    if not ruta.startswith("projects/"):
+        ruta = "/" + ruta
+    url = (f"https://dialogflow.clients6.google.com/{ver}/{ruta.lstrip('/')}"
+           f"?key={CFG.api_key}")
+    try:
+        data = cons.request("GET", url, query=query)
+    except Exception as exc:
+        return {"endpoint": endpoint, "version": ver, "url": url,
+                "estado": elegido.get("estado"), "error": str(exc)[:400]}
+    return {"endpoint": endpoint, "version": ver, "url": url,
+            "estado": "ok", "datos": data}
 
 
 @mcp.tool()
 def cx_set_console_field(recurso: str = "", campo: str = "", valor: Any = None,
                          dry_run: bool = True, project: str = "",
                          agent: str = "") -> dict:
-    """Escribe UN campo de un recurso, incluso los que la API publica no declara.
+    """Write ONE field of a resource, even those that the API publishes does not declare.
 
-    Es la version **generica** de "poner un playbook como destino": en vez de
-    un metodo por operacion, hay UNA:
+    It is the **generic** version of "set a playbook as the target": instead of
+    one method per operation, there is ONE:
 
-        GET  recurso -> se aplica el valor en la ruta -> PATCH -> GET y compara.
+        GET  resource -> the value is applied on the route -> PATCH -> GET and compares.
 
-    La comparacion final es la garantia: el servidor puede descartar un campo
-    en silencio, y la respuesta dice que se guardo y que se perdio.
+    The final comparison is the guarantee: the server can drop a field
+    silently, and the response says what was saved and what was lost.
 
-    - recurso: el recurso. Acepta el `name` completo que devuelve la API
-                (`projects/.../agents/.../flows/.../pages/...`) o una forma
-                corta: `flow/<id>`, `page/<flowId>/<pageId>`,
+    - resource: the resource. Accepts the full `name` returned by the API
+                (`projects/.../agents/.../flows/.../pages/...`) or a short
+                form: `flow/<id>`, `page/<flowId>/<pageId>`,
                 `playbook/<id>`, `tool/<id>`, `intent/<id>`,
                 `entityType/<id>`, `transitionRouteGroup/<id>`, `agent`.
-    - campo:   ruta del campo. Admite indices: `transitionRoutes[0].targetPlaybook`,
+    - field:   field route. Accepts indices: `transitionRoutes[0].targetPlaybook`,
                 `form.parameters[0].description`, `entities[0].dtmfPattern`,
                 `webClientSettings.boxBorderRadius`.
-                Para arrays completos: `transitionRoutes` con el array entero
-                como valor.
-    - valor:   el valor (JSON). Para borrar un campo, `null`.
-    - dry_run: True (por defecto) = no escribe; devuelve el plan y el diff.
-    - agent:   agente (por defecto, `CXP_DEFAULT_AGENT`); solo hace falta para
-                las formas cortas.
+                For whole arrays: `transitionRoutes` with the entire array
+                as the value.
+    - value:   the value (JSON). To delete a field, `null`.
+    - dry_run: True (default) = does not write; returns the plan and the diff.
+    - agent:   agent (by default, `CXP_DEFAULT_AGENT`); only needed for
+                the short forms.
 
-    OJO: para poner el destino a un playbook, `targetPlaybook` es un `oneof`
-    con `targetPage`/`targetFlow`: hay que quitar esos dos. Lo hace
-    `cx_set_route_playbook` por ti.
-    """
+    NOTE: to set the target to a playbook, `targetPlaybook` is a `oneof`
+    with `targetPage`/`targetFlow`: those two must be removed. `cx_set_route_playbook` does it
+    for you."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     agent_id = _resolve_agent(agent)
@@ -1458,25 +1709,24 @@ def cx_set_console_field(recurso: str = "", campo: str = "", valor: Any = None,
 def cx_set_group_route_playbook(agent: str = "", group: str = "", route: str = "",
                                 playbook: str = "", dry_run: bool = True,
                                 project: str = "") -> dict:
-    """Pone un PLAYBOOK como destino de una transition route de un GRUPO DE RUTAS.
+    """Sets an PLAYBOOK as the target of a transition route of a GROUP FROM ROUTES.
 
-    El tercer miembro de la familia del "agregado": una `transitionRouteGroup`
-    es un recurso propio (`.../agents/{A}/transitionRouteGroups/{G}`) y sus
-    rutas son `TransitionRoute` como las de una pagina o las de un flow. La
-    API publica declara ese mismo `TransitionRoute` **sin** `targetPlaybook`:
-    por API publica no se puede expresar.
+    The third member of the "agregado" family: a `transitionRouteGroup`
+    is its own resource (`.../agents/{A}/transitionRouteGroups/{G}`) and its
+    routes are `TransitionRoute` like those of a page or a flow. The
+    public API declares that same `TransitionRoute` **without** `targetPlaybook`:
+    it cannot be expressed via public API.
 
-    - agent:   id del agente (por defecto, `CXP_DEFAULT_AGENT`).
-    - group:   id o displayName del grupo de rutas.
-    - route:   uuid de la ruta, su condicion EXACTA, o su indice (0-based).
-               **Si se omite, la herramienta solo LEE** y devuelve las rutas
-               del grupo con su destino actual.
-    - playbook: displayName o id del playbook destino (por defecto, NO cambia).
-    - dry_run: True (por defecto) = no escribe; devuelve el plan.
+    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - group:   id or displayName of the route group.
+    - route:   route uuid, its EXACT condition, or its index (0-based).
+               **If omitted, the tool only READS** and returns the routes
+               of the group with their current target.
+    - playbook: displayName or id of the target playbook (default, does NOT change).
+    - dry_run: True (default) = does not write; returns the plan.
 
-    OJO: los grupos de rutas se COMPARTEN entre paginas y flows: tocar uno
-    cambia el comportamiento de todas las paginas que lo usen.
-    """
+    NOTE: route groups are SHARE between pages and flows: touching one
+    changes the behavior of all pages that use it."""
     if not CFG.credentials_ok():
         return _sin_credenciales()
     agent_id = _resolve_agent(agent)
@@ -1564,7 +1814,7 @@ def cx_set_group_route_playbook(agent: str = "", group: str = "", route: str = "
     except ReadOnlyAgentError as exc:
         return {"error": str(exc), "agente": agent_id}
 
-    # Se quita el `oneof` (targetPage/targetFlow) del elemento de la ruta.
+    # The `oneof` (targetPage/targetFlow) is removed from the route element.
     try:
         grupo_actual = cons.request("GET", cons._url("/" + group_name))
         rutas_actuales = grupo_actual.get("transitionRoutes") or []

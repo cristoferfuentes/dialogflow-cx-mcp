@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
-"""Prueba la API INTERNA de la consola (clients6/v3alpha1) con la sesion de
-primera parte (cookies de Google + SAPISIDHASH + API key).
+"""Tests the console's INTERNAL API (clients6/v3alpha1) with the first party
+session (Google cookies + SAPISIDHASH + API key).
 
-Objetivo: comprobar si `TransitionRoute` trae `targetPlaybook` y recuperar el
-mapa ruta -> playbook del agente ORIGINAL (solo lectura).
+Goal: check whether `TransitionRoute` brings `targetPlaybook` and recover the
+route -> playbook map of the ORIGINAL agent (read only).
 
-Uso:
+Usage:
   .venv/bin/python probe_console_api.py [--agent original|clon] [--flow ID] [--page ID]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _entorno import agentes_de_sonda, targets_de_sonda
+
 from cxp.auth import first_party_headers, pick_google_cookies, pick_sapisid
 from cxp.config import load_config
-
-from _entorno import agentes_de_sonda, targets_de_sonda
 from cxp.httpclient import HttpStatusError, Session
 
-API_KEY = "AIzaSyD1dO8oRagJkmtkSJ9oLI289jIT8M4Zk5s"
+# The console API key is read from the environment (`CXP_API_KEY`); it is never hardwired.
+API_KEY = os.environ.get("CXP_API_KEY", "")
 
 AGENTS = agentes_de_sonda()
-# Los flows y las paginas tambien salen del entorno:
-#   CXP_PROBE_TARGETS="por_defecto=<agente>,<flow>,<pagina>"
+# The flows and pages also come from the environment:
+#   CXP_PROBE_TARGETS="por_defecto=<agent>,<flow>,<page>"
 _TARGETS = targets_de_sonda()
 FLOWS = {k: v["flow"] for k, v in _TARGETS.items()}
 PAGES = {k: v["page"] for k, v in _TARGETS.items()}
@@ -38,7 +40,7 @@ def build_headers(cfg) -> dict:
     cookies = state.get("cookies", [])
     sapisid = pick_sapisid(cookies)
     if not sapisid:
-        raise SystemExit("sin SAPISID en .session-state.json: no hay sesion de Google")
+        raise SystemExit("no SAPISID in .session-state.json: there is no Google session")
     headers = first_party_headers(cfg.console_origin, sapisid)
     extra = pick_google_cookies(cookies)
     if extra:
@@ -85,7 +87,7 @@ def main() -> int:
             print(f"== {label}: {type(exc).__name__}: {exc}", flush=True)
             out[label] = {"_error": f"{type(exc).__name__}: {exc}"}
 
-    # Resumen de las rutas y su destino
+    # Summary of the routes and their target
     for label in ("flow", "page"):
         data = out.get(label) or {}
         routes = data.get("transitionRoutes") or []
@@ -96,11 +98,11 @@ def main() -> int:
             keys = sorted(r.keys())
             target = r.get("targetPlaybook") or r.get("targetFlow") or r.get("targetPage")
             print(f"   {r.get('name','').split('/')[-1]}  cond={str(r.get('condition'))[:70]}", flush=True)
-            print(f"      destino={target}  claves={keys}", flush=True)
+            print(f"      target={target}  keys={keys}", flush=True)
 
     if args.out:
         Path(args.out).write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
-        print(f"\n== escrito en {args.out}", flush=True)
+        print(f"\n== written to {args.out}", flush=True)
     return 0
 
 

@@ -4,12 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dialogflow-cx-mcp"
-version = "0.2.0"
-description = "MCP server: espejo de la API v3beta1 de Dialogflow CX + los campos que la API publica no puede expresar"
+version = "0.3.0"
+description = "MCP server: a mirror of the Dialogflow CX v3beta1 API + the fields the public API cannot express"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
-keywords = ["mcp", "dialogflow", "dialogflow-cx", "agent", "api", "google-cloud"]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "dialogflow",
+    "dialogflow-cx",
+    "conversational-agents",
+    "google-cloud",
+    "agent",
+    "playbook",
+    "llm",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -18,6 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
@@ -27,11 +38,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4",
+    "ruff>=0.5",
 ]
 
 [project.urls]
-Homepage = "https://github.com/<TU-USUARIO>/dialogflow-cx-mcp"
-Issues = "https://github.com/<TU-USUARIO>/dialogflow-cx-mcp/issues"
+Homepage = "https://github.com/cristoferfuentes/dialogflow-cx-mcp"
+Repository = "https://github.com/cristoferfuentes/dialogflow-cx-mcp"
+Issues = "https://github.com/cristoferfuentes/dialogflow-cx-mcp/issues"
+Changelog = "https://github.com/cristoferfuentes/dialogflow-cx-mcp/blob/main/CHANGELOG.md"
+Security = "https://github.com/cristoferfuentes/dialogflow-cx-mcp/security/policy"
 
 [tool.setuptools]
 packages = ["cxp"]
@@ -49,3 +64,8 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The probes insert the package root in sys.path before importing `cxp`,
+# so their module level imports cannot be at the top of the file.
+"probes/*" = ["E402"]
