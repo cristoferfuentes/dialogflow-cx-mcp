@@ -80,13 +80,15 @@ CXP_AGENT_READ=<uuid>[,<uuid>...]       # read-only
 > a login window in those browsers. Reading an existing session from another browser is fine;
 > making a login in it is not. Official Chrome: `wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb | sudo apt-get install -y -`
 
-### The two agent lists are REQUIRED
+### The agent lists
 
 `CXP_AGENT_READ` and `CXP_AGENT_READWRITE` are the allowlist, and **each one accepts as many
 agents as you need** (comma-separated).
 
-* **They are what makes the MCP work.** With no agent in either list there is nothing to operate
-  on: the server starts, but every tool refuses (`no allowed agent`).
+* **At least one of the two lists must have an agent** — you do **not** need both:
+  `CXP_AGENT_READWRITE` (read + write), `CXP_AGENT_READ` (read only), or one agent in each.
+  With both lists empty there is nothing to operate on: the server starts, but every tool
+  refuses (`no allowed agent`).
 * **They are the security boundary of the harness.** The cookies can reach **everything** your
   Google account can reach; the allowlist is what keeps the agent inside the agents you chose. It
   is enforced in the low layer, on every agent of every request (path **and** query), with the

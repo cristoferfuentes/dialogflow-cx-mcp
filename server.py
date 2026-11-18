@@ -92,12 +92,12 @@ targetPlaybook, advancedSettings.speechSettings, dtmfPattern, webClientSettings,
 
 2) WORK ONLY ON THE AGENTS OF THE ALLOWLIST: the agents of CXP_AGENT_READ (read\
 -only) and CXP_AGENT_READWRITE (read + write). Each list accepts as many agents\
-as needed. The others do not exist for you: they are not listed and every\
-operation on them is refused. Call cx_status to see the table. These two\
-variables are REQUIRED for the MCP to work at all, and they are the security\
-boundary of your harness: the session cookies can reach everything the Google\
-account can reach, and the allowlist is what keeps you inside the agents the\
-user chose.
+as needed, and AT LEAST ONE of the two lists has to have an agent (not\
+necessarily both). The others do not exist for you: they are not listed and\
+every operation on them is refused. Call cx_status to see the table. The\
+allowlist is the security boundary of your harness: the session cookies can\
+reach everything the Google account can reach, and the allowlist is what keeps\
+you inside the agents the user chose.
 
 3) WRITES ONLY ON CXP_AGENT_READWRITE AGENTS. An agent of CXP_AGENT_READ is\
 never modified. If a tool needs an agent and you did not pass one, it works only\

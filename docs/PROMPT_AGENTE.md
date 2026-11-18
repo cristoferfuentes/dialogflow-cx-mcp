@@ -16,12 +16,12 @@ are missing.
    `advancedSettings.speechSettings`, `dtmfPattern`, `webClientSettings`…), and this MCP
    is also the only path that enforces the per-agent allowlist.
 2. **Work only on the agents of the allowlist**: `CXP_AGENT_READ` (read only) and
-   `CXP_AGENT_READWRITE` (read + write). Each list accepts as many agents as needed.
-   The others do not exist for you: they are not listed and every operation on them is
-   refused. These two variables are **required** — without them the MCP has nothing to
-   work on — and they are the **security boundary of your harness**: the session cookies
-   can reach everything the Google account can reach, and the allowlist is what keeps
-   you inside the agents the user chose.
+   `CXP_AGENT_READWRITE` (read + write). Each list accepts as many agents as needed, and
+   **at least one of the two lists has an agent** (not necessarily both). The others do not
+   exist for you: they are not listed and every operation on them is refused. These two
+   variables are the **security boundary of your harness**: the session cookies can reach
+   everything the Google account can reach, and the allowlist is what keeps you inside the
+   agents the user chose.
 3. **Writes only on `CXP_AGENT_READWRITE` agents.** An agent of `CXP_AGENT_READ` is
    never modified.
 4. **If a task is blocked by these limits, do NOT look for a way around them** (no

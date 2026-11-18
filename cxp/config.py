@@ -17,11 +17,13 @@ All the MCP needs is **credentials**, not a browser:
     # An agent with no entry here is NOT accessible at all.
     # AT LEAST ONE of the two lists must have an agent: the MCP works on the
     # agents of the allowlist, and it does not have a "default agent".
+    # You do NOT need both lists: CXP_AGENT_READWRITE (read + write),
+    # CXP_AGENT_READ (read only), or one agent in each.
     # EACH list accepts as many agents as needed (comma-separated).
-    # These two variables are REQUIRED: without them the MCP cannot work at
-    # all, and they are the security boundary of the harness that consumes it
-    # (the cookies reach everything the account can reach; the allowlist is
-    # what keeps the agent inside the agents you chose).
+    # The allowlist is what the MCP works on AND the security boundary of the
+    # harness that consumes it (the cookies reach everything the account can
+    # reach; the allowlist is what keeps the agent inside the agents you
+    # chose).
     CXP_AGENT_READ=<uuid>[,<uuid>...]      # read only (GET/list)
     CXP_AGENT_READWRITE=<uuid>[,<uuid>...] # read + write (POST/PATCH/DELETE)
     CXP_PROJECTS=<project>,...              # optional: limits the projects
@@ -181,13 +183,18 @@ class Config:
 
         The allowlist is the only source of agents: with no agent in
         `CXP_AGENT_READ` nor in `CXP_AGENT_READWRITE` there is nothing to work
-        on, and the MCP says so instead of failing later with a 403."""
+        on, and the MCP says so instead of failing later with a 403.
+
+        **At least one of the two lists must have an agent** (you do NOT need
+        both): `CXP_AGENT_READWRITE` (read + write), `CXP_AGENT_READ` (read
+        only), or one agent in each."""
         if not self.agent_readwrite and not self.agent_read:
             return (
                 "no allowed agent: write at least one agent in CXP_AGENT_READ "
-                "(read-only) or in CXP_AGENT_READWRITE (read and write). Both "
-                "variables are REQUIRED: the allowlist is what the MCP works on "
-                "AND the security boundary of the harness that consumes it"
+                "(read only) or in CXP_AGENT_READWRITE (read and write). At "
+                "least ONE of the two lists must have an agent (not necessarily "
+                "both): the allowlist is what the MCP works on AND the "
+                "security boundary of the harness that consumes it"
             )
         return ""
 

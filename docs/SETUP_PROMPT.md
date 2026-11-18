@@ -31,11 +31,13 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
    - (optional) the agent ids I may only READ -> CXP_AGENT_READ (comma-separated)
    If I do not know the agent ids, keep going with the rest and list the agents you
    can see once the session works, so I can pick one.
-   NOTE: these two variables are REQUIRED: they are the allowlist of agents, the
-   MCP works on them and on nothing else (there is no "default agent" variable),
-   and they are the security boundary of the harness (the cookies can reach
-   everything my Google account can reach; these lists are what keep the agent
-   inside the agents I choose).
+   NOTE: at least ONE of these two lists must have an agent (you do NOT need
+   both): CXP_AGENT_READWRITE (read + write), CXP_AGENT_READ (read only), or
+   one agent in each. They ARE the allowlist of agents: the MCP works on them
+   and on nothing else (there is no "default agent" variable), and they are the
+   security boundary of the harness (the cookies can reach everything my Google
+   account can reach; these lists are what keep the agent inside the agents I
+   choose).
 
 2) INSTALL
    git clone https://github.com/cristoferfuentes/dialogflow-cx-mcp.git
@@ -134,8 +136,9 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
      CXP_AGENT_READWRITE=<the agents I may write, comma separated>
      CXP_AGENT_READ=<the agents I may only read, comma separated>
    Then: chmod 600 .env
-   - BOTH agent lists accept as many agents as needed (comma-separated). At least
-     one of the two must have an agent: without them the MCP has nothing to work on.
+   - AT LEAST ONE of the two lists must have an agent (you do NOT need both):
+     CXP_AGENT_READWRITE, CXP_AGENT_READ, or one agent in each. With both
+     empty the MCP has nothing to work on.
    - These two lists ARE the agents of the MCP: it works on them and on nothing
      else (the others are not even listed), and they are the security boundary of
      your harness: the cookies can reach everything my Google account can reach,

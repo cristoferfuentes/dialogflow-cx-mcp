@@ -38,13 +38,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `CXP_AGENT_READWRITE` are comma-separated lists and each one can carry several agents
   (the code already parsed them; the documentation implied a single agent per list).
   Every agent keeps its own level and `cx_status` returns one row per agent.
-- The documentation now states **explicitly that those two variables are REQUIRED**:
-  they are what makes the MCP work (without an agent in either list there is nothing to
-  operate on and every tool refuses) **and they are the security boundary of the
-  harness** that consumes the MCP: the session cookies can reach everything the Google
-  account can reach, and the allowlist is what keeps the agent inside the agents the
-  user chose. Said in the README, `.env.example`, `docs/SETUP_PROMPT.md`,
-  `docs/PROMPT_AGENTE.md` and in the `instructions` of the MCP server.
+- The documentation now states **explicitly that the allowlist is what makes the MCP
+  work**: **at least one of the two lists must have an agent** (you do **not** need both —
+  `CXP_AGENT_READWRITE`, `CXP_AGENT_READ`, or one agent in each; with both empty every tool
+  refuses) **and that the allowlist is the security boundary of the harness** that consumes
+  the MCP: the session cookies can reach everything the Google account can reach, and the
+  allowlist is what keeps the agent inside the agents the user chose. Said in the README,
+  `.env.example`, `docs/SETUP_PROMPT.md`, `docs/PROMPT_AGENTE.md` and in the `instructions`
+  of the MCP server.
 - The **rules of the MCP** are now sent to the agent that consumes it: the MCP
   server declares them in its `instructions` (they arrive with the handshake) and
   `cx_status` returns them again in `reglas`. They say: use only these tools (never

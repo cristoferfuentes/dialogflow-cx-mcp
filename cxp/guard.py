@@ -10,11 +10,13 @@ Permission model (allowlist, via environment variables):
     CXP_AGENT_READ=<uuid>[,<uuid>]        read-only (ONE OR MORE agents)
     CXP_PROJECTS=<project>[,...]          (optional) restricts projects
 
-**Both lists accept as many agents as needed** (comma-separated). At least one
-of the two must contain an agent: the allowlist is BOTH what the MCP works on
-and the **security boundary of the harness** that consumes it (the session
-cookies can reach everything the Google account can reach; the allowlist is
-what keeps the agent inside the agents you chose).
+**Both lists accept as many agents as needed** (comma-separated). **At least one
+of the two must have an agent** — you do NOT need both: `CXP_AGENT_READWRITE`
+(read + write), `CXP_AGENT_READ` (read only), or one agent in each. The
+allowlist is BOTH what the MCP works on and the **security boundary of the
+harness** that consumes it (the session cookies can reach everything the Google
+account can reach; the allowlist is what keeps the agent inside the agents you
+chose).
 
 An agent **without** an entry in either list is NOT accessible: not
 even for reading. Entries accept two forms:
@@ -101,10 +103,10 @@ def is_read_only(agent_id: str, cfg: Config) -> bool:
 # --- the allowlist IS the list of agents (there is no "default agent") ------
 
 NO_AGENTS_MSG = (
-    "no allowed agent: write at least one agent in CXP_AGENT_READ (read-only) "
-    "or in CXP_AGENT_READWRITE (read and write). Both variables are REQUIRED: "
-    "the allowlist is what the MCP works on AND the security boundary of the "
-    "harness that consumes it"
+    "no allowed agent: write at least one agent in CXP_AGENT_READ (read only) "
+    "or in CXP_AGENT_READWRITE (read and write). At least ONE of the two lists "
+    "must have an agent (not necessarily both): the allowlist is what the MCP "
+    "works on AND the security boundary of the harness that consumes it"
 )
 
 

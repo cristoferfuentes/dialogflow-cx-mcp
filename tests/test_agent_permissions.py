@@ -79,6 +79,24 @@ def test_with_agents_there_is_no_permissions_error():
     assert cfg.allowed_agent_ids() == [WRITE_AGENT, READ_AGENT]
 
 
+def test_basta_con_una_sola_de_las_dos_listas():
+    """ONE of the two lists is enough: you do NOT need both.
+
+    `CXP_AGENT_READWRITE` alone works, `CXP_AGENT_READ` alone works, and only
+    the empty-allowlist case is an error."""
+    solo_escritura = _cfg(writes=[WRITE_AGENT], reads=[])
+    assert solo_escritura.permissions_error() == ""
+    assert solo_escritura.allowed_agent_ids() == [WRITE_AGENT]
+
+    solo_lectura = _cfg(writes=[], reads=[READ_AGENT])
+    assert solo_lectura.permissions_error() == ""
+    assert solo_lectura.allowed_agent_ids() == [READ_AGENT]
+
+    # only the empty case fails
+    ninguna = _cfg(writes=[], reads=[])
+    assert ninguna.permissions_error() != ""
+
+
 # ------------------------------------------------------------- resolution
 def test_with_a_single_agent_it_is_deduced():
     cfg = _cfg(writes=[WRITE_AGENT], reads=[])
@@ -198,8 +216,9 @@ def test_the_permission_messages_are_in_english():
     empty = Config(project="proj", location="global")
     assert "no allowed agent" in empty.permissions_error()
     assert "CXP_AGENT_READ" in NO_AGENTS_MSG
-    assert "REQUIRED" in NO_AGENTS_MSG
     assert "security boundary" in NO_AGENTS_MSG
+    # and it says that ONE of the two lists is enough (not necessarily both)
+    assert "not necessarily both" in NO_AGENTS_MSG
 
 
 # ------------------------------------------------------------- listings
