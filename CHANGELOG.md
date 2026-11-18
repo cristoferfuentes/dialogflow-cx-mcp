@@ -9,6 +9,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The installer now probes the machine and says what it cannot do.** The setup
+  prompt no longer assumes that the cookie can be obtained: it runs a probe
+  (Chrome binary, `DISPLAY`, Xvfb/noVNC, browser profile), picks the route that
+  is really possible and, when the automatic one is impossible (headless server,
+  container, SSH box, no Chrome), it tells the user **explicitly** that the cookie
+  cannot be obtained on this machine, explains the reason in one sentence, gives
+  the manual recipe (copy the **whole** `Cookie` header from DevTools) and
+  finishes the rest of the setup while it waits. It never invents a credential
+  and the verification step cannot be reported as passed with a credential
+  missing. `probes/renueva_cookies.py` prints the same three options (A: desktop
+  browser, B: start a virtual display with Xvfb, C: copy it manually) and exits
+  with code 2 when it cannot reach a browser.
 - **The allowlist accepts as many agents as needed in each list.** `CXP_AGENT_READ` and
   `CXP_AGENT_READWRITE` are comma-separated lists and each one can carry several agents
   (the code already parsed them; the documentation implied a single agent per list).

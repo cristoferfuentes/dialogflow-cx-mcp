@@ -55,8 +55,27 @@ def main() -> int:
 
     chrome = RealChrome(display=cfg.display, profile_dir=cfg.real_profile_dir,
                          port=cfg.cdp_port)
-    chrome.launch("about:blank")
-    chrome.connect()
+    try:
+        chrome.launch("about:blank")
+        chrome.connect()
+    except Exception as exc:
+        print(f"CANNOT REACH A BROWSER: {exc}")
+        print("")
+        print("The cookie CANNOT be obtained on this machine automatically. Pick one:")
+        print("  A) this machine has a desktop with Chrome and your Google session:")
+        print("     open the console in that Chrome, log in, and run this again.")
+        print("  B) this machine has no desktop (headless server, container, SSH):")
+        print("     start a virtual display first, e.g.  Xvfb :99 -screen 0 1280x800x24")
+        print("     and export DISPLAY=:99  (the MCP reads CXP_DISPLAY, default :99),")
+        print("     then run this again.")
+        print("  C) neither is possible: copy the cookie MANUALLY from your own")
+        print("     browser -> open https://conversational-agents.cloud.google.com")
+        print("     -> F12 -> Network -> reload -> filter by 'clients6.google.com'")
+        print("     -> click a request -> Request Headers -> copy the COMPLETE value")
+        print("     of the 'Cookie' header -> put it in the .env as CXP_COOKIE=\"...\"")
+        print("     (copy it WHOLE: with only the 5 'required' cookies the backend")
+        print("     answers 401). The same URL carries the API key: the key= parameter.")
+        return 2
     time.sleep(2)
     try:
         cookies = google_cookies(chrome.page)
@@ -72,6 +91,8 @@ def main() -> int:
         return 1 if missing else 0
     if missing:
         print("the browser has no session: open the console with your account and repeat")
+        print("  -> https://conversational-agents.cloud.google.com")
+        print("  (the login is a human step: the agent cannot log in for you)")
         return 1
 
     # The WHOLE jar is written, not just the 5: with 5 cookies the backend

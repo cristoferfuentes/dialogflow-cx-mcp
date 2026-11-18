@@ -30,6 +30,13 @@ The agent installs the package, gets the credentials, writes the `.env`, registe
 your MCP client and verifies it. It will only ask you for your project id, the location and the
 agents you may read and write.
 
+> **If the credentials cannot be obtained automatically, the agent says so.** The cookies live
+> in a Google session of a real browser: on a headless server, in a container or over SSH there
+> is nothing to read them from. The installer probes the machine first and, when the automatic
+> route is impossible, it tells you **why**, hands you the manual recipe (copy the **whole**
+> `Cookie` header from DevTools) and finishes the rest of the setup while you paste it back.
+> It never invents a credential and never reports the setup as finished with a missing one.
+
 <details>
 <summary>Manual install</summary>
 

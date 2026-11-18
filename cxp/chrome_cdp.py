@@ -81,7 +81,7 @@ class RealChrome:
         binary = find_chrome()
         if not binary:
             raise RuntimeError(
-                "no hay Chrome real instalado (busque en "
+                "no real Chrome installed (looked in "
                 + ", ".join(CHROME_CANDIDATES) + ")"
             )
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -128,7 +128,11 @@ class RealChrome:
             except Exception:
                 pass
             time.sleep(1)
-        raise RuntimeError("Chrome did not open the CDP port")
+        raise RuntimeError(
+            "Chrome did not open the CDP port. If this machine has no desktop, "
+            "start a virtual display (Xvfb :99) and set CXP_DISPLAY=:99, or take "
+            "the cookie manually from your own browser"
+        )
 
     def connect(self) -> Any:
         """Connects via CDP and returns the context with the first tab."""
@@ -141,7 +145,7 @@ class RealChrome:
         )
         ctxs = self._browser.contexts
         if not ctxs:
-            raise RuntimeError("Chrome no tiene contextos")
+            raise RuntimeError("Chrome has no contexts")
         self._ctx = ctxs[0]
         pages = self._ctx.pages
         self.page = pages[0] if pages else self._ctx.new_page()
