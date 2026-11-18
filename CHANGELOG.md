@@ -9,6 +9,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The Google login is only attempted in the OFFICIAL Google Chrome.** Google
+  invalidates the sessions created in **Chromium** or in a **"Chrome for Testing"**
+  build: the sign-in looks like it works and then the session dies on its own (401,
+  `/v3/signin/rejected`). Now:
+  - `cxp/chrome_cdp.py` classifies the binaries (`OFFICIAL_CHROME_CANDIDATES` vs
+    `EXPERIMENTAL_CHROME_CANDIDATES`) and the official Chrome is preferred;
+  - `cxp/browser.py` **refuses to open a login window** outside the official Chrome
+    and says what to do instead (install the official Chrome, or take the cookie
+    manually);
+  - `probes/renueva_cookies.py` warns when the session comes from a non-official
+    browser (reading an existing session there is fine; making a login in it is not);
+  - the setup prompt, the README and the new limit
+    `login_in_chromium_is_invalidated` (32 traps now) say the same.
 - **The installer now probes the machine and says what it cannot do.** The setup
   prompt no longer assumes that the cookie can be obtained: it runs a probe
   (Chrome binary, `DISPLAY`, Xvfb/noVNC, browser profile), picks the route that

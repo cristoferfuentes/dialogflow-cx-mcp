@@ -23,24 +23,65 @@ from pathlib import Path
 from typing import Any
 
 # Chrome binaries, in order of preference.
-CHROME_CANDIDATES = [
-    # Official Google Chrome first (Chrome for Testing NO: Google warns
-    # that it is for testing and may treat it differently at login).
+#
+# IMPORTANT (measured): a Google session created in **Chromium** or in a
+# **"Chrome for Testing"** build is invalidated by Google: the login "works" and
+# then stops working (401 / /v3/signin/rejected). So those browsers can be used
+# to READ an existing session, but **never to sign in**.
+OFFICIAL_CHROME_CANDIDATES = [
     "/opt/google/chrome/chrome",
-    "/opt/chrome-cft/chrome-linux64/chrome",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome-beta",
+]
+
+# These work as browsers, but a login made in them is invalidated by Google.
+EXPERIMENTAL_CHROME_CANDIDATES = [
+    "/opt/chrome-cft/chrome-linux64/chrome",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
 ]
 
+CHROME_CANDIDATES = OFFICIAL_CHROME_CANDIDATES + EXPERIMENTAL_CHROME_CANDIDATES
 
-def find_chrome() -> str | None:
-    for p in CHROME_CANDIDATES:
+# How to install the official Chrome on a Debian/Ubuntu machine.
+INSTALL_OFFICIAL_CHROME = (
+    "install the official Google Chrome (the only browser where a Google login "
+    "survives): "
+    "wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb "
+    "| sudo apt-get install -y -"
+)
+
+
+def is_official_chrome(path: str | None) -> bool:
+    """Is this binary the OFFICIAL Google Chrome (and not Chromium / CFT)?"""
+    if not path:
+        return False
+    p = str(path)
+    if any(p.startswith(c) for c in OFFICIAL_CHROME_CANDIDATES):
+        return True
+    base = Path(p).name.lower()
+    if "chromium" in base:
+        return False
+    if "chrome-cft" in p or "chrome-for-testing" in p or "chrome-cft" in base:
+        return False
+    # `google-chrome`, `google-chrome-stable`, ... are official.
+    return base.startswith("google-chrome")
+
+
+def find_chrome(official_only: bool = False) -> str | None:
+    """The Chrome binary of this machine.
+
+    `official_only=True` returns the official Google Chrome (or None): it is
+    what a LOGIN needs."""
+    candidates = OFFICIAL_CHROME_CANDIDATES if official_only else CHROME_CANDIDATES
+    for p in candidates:
         if Path(p).exists():
             return p
-    found = shutil.which("google-chrome") or shutil.which("chromium")
-    return found
+    found = shutil.which("google-chrome")
+    if official_only:
+        return found if is_official_chrome(found) else None
+    return found or shutil.which("chromium")
 
 
 def port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> bool:

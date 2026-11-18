@@ -48,6 +48,7 @@ with the exact symptom, the cause and the workaround.
 | `environment_requires_all_flows` | creating an environment -> 400 *"Flow 'X' … is not included in the environment"* (then *"Playbook 'P' … is not included"*) | publish a version of **each** flow and put them all in `versionConfigs` |
 | `test_cases_without_delete` | `DELETE agents/{a}/testCases/{id}` -> **404** (the method does not exist) | `POST agents/{a}/testCases:batchDelete` with `{"names": [...]}` |
 | `endpoints_outside_the_descriptor` | the UI shows data the public API **does not expose** (system entity types, who has access, which models exist…) | `cx_endpoints_consola` calls them; `cx_api` with `version=` and absolute paths reaches them |
+| `login_in_chromium_is_invalidated` | a Google login made in **Chromium** or in a **"Chrome for Testing"** build looks like it works and then dies on its own (401, `/v3/signin/rejected`) | sign in **only in the official Google Chrome** (`wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \| sudo apt-get install -y -`); the MCP refuses to open a login window in any other browser. Reading an existing session from another browser is fine, making a login in it is not |
 
 ---
 

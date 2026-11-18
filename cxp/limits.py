@@ -486,6 +486,26 @@ LIMITES: list[dict[str, Any]] = [
                       "`cx_endpoints_consola`.",
         "tags": ["methods", "descriptor", "console"],
     },
+    {
+        "id": "login_in_chromium_is_invalidated",
+        "title": "A Google login made in Chromium or in a 'Chrome for Testing' "
+                 "build is invalidated",
+        "symptom": "the sign-in appears to work and the session dies on its own: "
+                   "the console answers 401 and `/v3/signin/rejected` appears, "
+                   "with the very same `.env` that worked minutes before.",
+        "cause": "Google does not keep the sessions of the browsers it does not "
+                 "ship: Chromium and the 'Chrome for Testing' builds are "
+                 "flagged at the login, and the session made there is revoked "
+                 "afterwards. Only the official Google Chrome keeps it.",
+        "workaround": "sign in ONLY in the official Google Chrome (install it "
+                      "with `wget -q -O - "
+                      "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb "
+                      "| sudo apt-get install -y -`); the MCP refuses to open a "
+                      "login window in any other browser. Reading an existing "
+                      "session from another browser is fine; making a login in "
+                      "it is not.",
+        "tags": ["auth", "login", "browser", "cookies"],
+    },
 ]
 
 

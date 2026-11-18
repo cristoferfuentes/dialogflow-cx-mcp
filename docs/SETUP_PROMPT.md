@@ -70,6 +70,15 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
          human step: you cannot log in for me.)
        - If it cannot reach the browser: it needs a DISPLAY -> route A2 or B.
 
+       !! NEVER make the Google login in Chromium or in a "Chrome for Testing"
+          build: Google invalidates those sessions (the login seems to work and
+          then stops working: 401 / /v3/signin/rejected). Only the OFFICIAL
+          Google Chrome keeps a session alive. If this machine only has
+          Chromium or Chrome for Testing, install the official one:
+            wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb | sudo apt-get install -y -
+          (ask me before installing anything system-wide). If that is not
+          possible, go to route B and take the cookie from my own browser.
+
    3.3 ROUTE A2 — no desktop display, but this machine can run a VIRTUAL one
        (Xvfb is installed): the cookie is still obtainable, but I need to log in
        through the virtual browser:
@@ -79,6 +88,7 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
          `probes/public_url.sh` for that).
        - Give me the URL and wait until I tell you I am logged in.
        - Then run `probes/renueva_cookies.py` and check the result.
+       - The login must be in the OFFICIAL Google Chrome (see 3.2).
        - If no VNC tunnel is possible here, say so and continue with route B.
 
    3.4 ROUTE B — NO usable browser here (headless server with no virtual display,
@@ -221,6 +231,14 @@ the session renews. That is why the prompt insists on the **whole** header, and 
 | **a desktop browser with your Google session** | it launches that Chrome over CDP, reads the **whole** `.google.com` cookie jar and writes it into the `.env` (`probes/renueva_cookies.py`). If the browser has no session, it opens the console there and **you** log in |
 | **no desktop, but a virtual display is possible** (Xvfb) | it starts the virtual display (`:99`), exposes it with noVNC, **you** log in through that URL and it then reads the cookie jar from it |
 | **no usable browser** (no Chrome, no display and no virtual one, container, SSH box) | it tells you **explicitly** that it cannot obtain the cookie on this machine, explains why in one sentence, and gives you the manual recipe. It never invents a credential and never reports the setup as finished |
+
+> **The login is only worth doing in the OFFICIAL Google Chrome.** Google invalidates the
+> sessions created in **Chromium** or in a **"Chrome for Testing"** build: the sign-in
+> appears to work and then the session dies on its own (401, `/v3/signin/rejected`).
+> The MCP refuses to open a login window in those browsers, and the prompt tells the
+> agent to install the official Chrome instead:
+> `wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb | sudo apt-get install -y -`
+> Reading an *existing* session from another browser is fine; making a *login* in it is not.
 
 ---
 

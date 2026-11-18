@@ -74,6 +74,12 @@ CXP_AGENT_READ=<uuid>[,<uuid>...]       # read-only
 | **the cookie** | same request → **Request Headers** → copy the **whole** `Cookie` header (not only the 5 "required" cookies: with 5 of 23 the answer is **401**, with the header as-is it is **200**) |
 | **automatically** | `.venv/bin/python probes/renueva_cookies.py` (real Chrome over CDP, writes the full jar into your `.env`) |
 
+> ⚠️ **Make the Google login in the OFFICIAL Google Chrome only.** Google invalidates the
+> sessions created in **Chromium** or in a **"Chrome for Testing"** build: the sign-in looks
+> like it works and then dies on its own (401, `/v3/signin/rejected`). The MCP refuses to open
+> a login window in those browsers. Reading an existing session from another browser is fine;
+> making a login in it is not. Official Chrome: `wget -q -O - https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb | sudo apt-get install -y -`
+
 ### The two agent lists are REQUIRED
 
 `CXP_AGENT_READ` and `CXP_AGENT_READWRITE` are the allowlist, and **each one accepts as many
@@ -174,7 +180,7 @@ again:
 |---|---|
 | **[docs/SETUP_PROMPT.md](docs/SETUP_PROMPT.md)** | 🤖 the setup prompt (the default install) |
 | **[docs/HUECOS_API.md](docs/HUECOS_API.md)** | 🍩 the gaps: the 38 fields the public API cannot express, the 9 endpoints in no descriptor |
-| **[docs/LIMITES_API.md](docs/LIMITES_API.md)** | 🪨 the measured limits: symptom → cause → workaround for 31 traps |
+| **[docs/LIMITES_API.md](docs/LIMITES_API.md)** | 🪨 the measured limits: symptom → cause → workaround for 32 traps |
 | **[docs/PROMPT_AGENTE.md](docs/PROMPT_AGENTE.md)** | 🧭 the instructions for the agent that consumes this MCP |
 | **[docs/CONVERSATIONS.md](docs/CONVERSATIONS.md)** | 💬 conversation history through the API |
 | **[docs/VERIFICATION.md](docs/VERIFICATION.md)** | 📋 the report of the last full run |

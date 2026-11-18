@@ -384,6 +384,10 @@ class ConsoleBrowser:
             return SessionState(True, email, reason)
 
         # No session -> the window opens so the user can sign in to Google.
+        # BUT ONLY in the OFFICIAL Google Chrome: a login made in Chromium or in
+        # a "Chrome for Testing" build is invalidated by Google (the session
+        # "works" and then stops working), so it is never worth doing it there.
+        self._assert_login_browser_is_official()
         self.close()
         self._launch(headless=False)
         self.open_console(console_url)
@@ -396,10 +400,35 @@ class ConsoleBrowser:
                     self._ctx.storage_state(path=str(self.cfg.state_file))
                 except Exception:
                     pass
-                return SessionState(True, email, f"login completado: {reason}")
+                return SessionState(True, email, f"login completed: {reason}")
             time.sleep(2)
         self.close()
         return SessionState(False, None, "timeout waiting for the login to start")
+
+    def _assert_login_browser_is_official(self) -> None:
+        """Refuse to open a LOGIN window in Chromium / Chrome for Testing.
+
+        Measured: Google invalidates the sessions created in those browsers, so
+        a login there is wasted work (and leaves a broken `.env` behind)."""
+        from .chrome_cdp import (
+            INSTALL_OFFICIAL_CHROME,
+            find_chrome,
+        )
+
+        binary = find_chrome(official_only=True)
+        if binary:
+            return
+        experimental = find_chrome()
+        which = experimental or "the browser this machine would use"
+        raise RuntimeError(
+            "refusing to open a LOGIN window in a non-official browser "
+            f"({which}): Google invalidates the sessions created in Chromium or "
+            "in a 'Chrome for Testing' build, so the login would not last. "
+            f"{INSTALL_OFFICIAL_CHROME}. If you cannot install it, take the "
+            "cookie manually from your own browser (the console -> DevTools -> "
+            "Network -> a request to clients6.google.com -> the whole 'Cookie' "
+            "header) and put it in the .env as CXP_COOKIE=\"...\""
+        )
 
     # ---------------------------------------------------------------- cookies
     def cookies(self) -> list[dict]:

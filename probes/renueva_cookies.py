@@ -75,6 +75,10 @@ def main() -> int:
         print("     of the 'Cookie' header -> put it in the .env as CXP_COOKIE=\"...\"")
         print("     (copy it WHOLE: with only the 5 'required' cookies the backend")
         print("     answers 401). The same URL carries the API key: the key= parameter.")
+        print("")
+        print("  Do NOT try to sign in to Google in Chromium or in a 'Chrome for")
+        print("  Testing' build: Google invalidates those sessions. Only the")
+        print("  official Google Chrome keeps a login alive.")
         return 2
     time.sleep(2)
     try:
@@ -84,6 +88,14 @@ def main() -> int:
             chrome.close()
         except Exception:
             pass
+
+    from cxp.chrome_cdp import is_official_chrome
+    if not is_official_chrome(chrome.binary):
+        print(f"NOTE: the browser is {chrome.binary}, not the official Google Chrome.")
+        print("  Reading an existing session from it is fine, but a LOGIN made in")
+        print("  Chromium or in a 'Chrome for Testing' build is invalidated by")
+        print("  Google. If this session dies on its own, that is why: redo the")
+        print("  login in the official Google Chrome.")
 
     missing = [n for n in NECESARIAS if not cookies.get(n)]
     print(f"google.com cookies: {len(cookies)} | missing the required ones: {missing or 'none'}")
