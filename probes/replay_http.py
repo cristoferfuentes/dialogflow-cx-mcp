@@ -19,13 +19,13 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 from cxp.httpclient import Session
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 
 # Headers that the browser ALWAYS sends on this API (captured from the wire).
 BROWSER_HEADERS = {

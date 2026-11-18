@@ -36,28 +36,28 @@ from cxp.console_api import ConsoleApi
 ERROR_BASE = ("not included in the environment", "referenced in version")
 
 
-def esperar(cons: ConsoleApi, op: dict, segundos: int = 120) -> dict:
-    nombre = op.get("name")
-    if not nombre or op.get("done") or "/operations/" not in nombre:
+def wait_for(cons: ConsoleApi, op: dict, seconds: int = 120) -> dict:
+    name = op.get("name")
+    if not name or op.get("done") or "/operations/" not in name:
         return op
-    for _ in range(segundos * 2):
+    for _ in range(seconds * 2):
         time.sleep(0.5)
-        op = cons.request("GET", cons._url("/" + nombre))
+        op = cons.request("GET", cons._url("/" + name))
         if op.get("done"):
             return op
     return op
 
 
-def playbooks_por_flow(cons: ConsoleApi, base: str) -> dict[str, list[str]]:
+def playbooks_by_flow(cons: ConsoleApi, base: str) -> dict[str, list[str]]:
     """Flow -> playbooks that reference its routes (transitive closure)."""
     flows = cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
     out: dict[str, list[str]] = {}
     for f in (flows.get("flows") or []):
         fid = f["name"].rsplit("/", 1)[-1]
         refs: set[str] = set()
-        paginas = cons.request("GET", cons._url(f"{base}/flows/{fid}/pages",
+        pages = cons.request("GET", cons._url(f"{base}/flows/{fid}/pages",
                                                 pageSize="100"))
-        for pg in (paginas.get("pages") or []):
+        for pg in (pages.get("pages") or []):
             for tr in (pg.get("transitionRoutes") or []):
                 if tr.get("targetPlaybook"):
                     refs.add(tr["targetPlaybook"])
@@ -65,22 +65,22 @@ def playbooks_por_flow(cons: ConsoleApi, base: str) -> dict[str, list[str]]:
         for tr in (fl.get("transitionRoutes") or []):
             if tr.get("targetPlaybook"):
                 refs.add(tr["targetPlaybook"])
-        cola = list(refs)
-        while cola:
-            nom = cola.pop()
+        queue = list(refs)
+        while queue:
+            ref_name = queue.pop()
             try:
-                pb = cons.request("GET", cons._url("/" + nom))
+                pb = cons.request("GET", cons._url("/" + ref_name))
             except Exception:
                 continue
             for ref in (pb.get("referencedPlaybooks") or []):
                 if ref and ref not in refs:
                     refs.add(ref)
-                    cola.append(ref)
+                    queue.append(ref)
         out[fid] = sorted(refs)
     return out
 
 
-def versiones(cons: ConsoleApi, base: str) -> list[tuple[str, str]]:
+def versions(cons: ConsoleApi, base: str) -> list[tuple[str, str]]:
     """[(flow_id, version_name)] with one version per flow (reuses if there is one)."""
     flows = cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
     out = []
@@ -94,7 +94,7 @@ def versiones(cons: ConsoleApi, base: str) -> list[tuple[str, str]]:
     return out
 
 
-def candidatos(playbooks: list[str]) -> list[tuple[str, object]]:
+def candidates(playbooks: list[str]) -> list[tuple[str, object]]:
     """(name, field value) -> they are tried inside `versionConfigs[i]`."""
     return [
         ("playbookConfigs[{playbook}]", [{"playbook": p} for p in playbooks]),
@@ -111,69 +111,69 @@ def candidatos(playbooks: list[str]) -> list[tuple[str, object]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    _proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    _project = args.project or cfg.project
     cons = ConsoleApi(cfg)
     base = f"/projects/{cfg.project}/locations/{cfg.location}/agents/{cfg.only_agent()}" \
-        if args.proyecto == "" else \
-        f"/projects/{args.proyecto}/locations/{cfg.location}/agents/{agente}"
+        if args.project == "" else \
+        f"/projects/{args.project}/locations/{cfg.location}/agents/{agent}"
 
-    pares = versiones(cons, base)
-    pbs = playbooks_por_flow(cons, base)
-    print(f"flows with a version: {len(pares)}")
+    pairs = versions(cons, base)
+    pbs = playbooks_by_flow(cons, base)
+    print(f"flows with a version: {len(pairs)}")
     total = sorted({p for v in pbs.values() for p in v})
     print(f"referenced playbooks: {len(total)}")
 
     # The flow that references the playbooks is the one that brings them in:
-    por_flow = {fid: pbs.get(fid, []) for fid, _ in pares}
+    by_flow = {fid: pbs.get(fid, []) for fid, _ in pairs}
 
-    errores: dict[str, str] = {}
-    for nombre_campo, valor in candidatos(total):
+    errors: dict[str, str] = {}
+    for field_name, value in candidates(total):
         vcs = []
-        for fid, version in pares:
+        for fid, version in pairs:
             vc = {"version": version}
-            pbs_flow = por_flow.get(fid) or []
+            pbs_flow = by_flow.get(fid) or []
             if pbs_flow:
-                vc[nombre_campo] = (valor if nombre_campo in
+                vc[field_name] = (value if field_name in
                                     ("playbooks[]", "playbookNames[]",
                                      "includedPlaybooks[]")
                                     else [{"playbook": p} if "playbook" in
-                                          str(list(valor)[:1]) else
+                                          str(list(value)[:1]) else
                                           ({"name": p} if "name" in
-                                           str(list(valor)[:1]) else
+                                           str(list(value)[:1]) else
                                            {"playbookId": p})
                                           for p in pbs_flow])
             vcs.append(vc)
-        cuerpo = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
-                  "description": "temporal: buscar el campo de playbooks",
+        body = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
+                  "description": "temporary: looking for the playbooks field",
                   "versionConfigs": vcs}
         try:
-            op = esperar(cons, cons.request(
-                "POST", cons._url(f"{base}/environments"), body=cuerpo))
-            resp = op.get("response") or {}
-            nombre = resp.get("name") or ""
-            if nombre:
-                print(f"  {nombre_campo:<32} -> CREATED ({nombre})")
-                cons.request("DELETE", cons._url("/" + nombre))
+            op = wait_for(cons, cons.request(
+                "POST", cons._url(f"{base}/environments"), body=body))
+            response = op.get("response") or {}
+            name = response.get("name") or ""
+            if name:
+                print(f"  {field_name:<32} -> CREATED ({name})")
+                cons.request("DELETE", cons._url("/" + name))
                 print("      (deleted)")
-                errores[nombre_campo] = "CREATED"
+                errors[field_name] = "CREATED"
                 continue
             err = json.dumps(op.get("error"), ensure_ascii=False)
         except Exception as exc:
             err = str(exc)
         if any(m in err for m in ERROR_BASE):
-            errores[nombre_campo] = "same error (field ignored)"
+            errors[field_name] = "same error (field ignored)"
         else:
-            errores[nombre_campo] = "DIFFERENT ERROR: " + err[:200]
-        print(f"  {nombre_campo:<32} -> {errores[nombre_campo][:150]}")
+            errors[field_name] = "DIFFERENT ERROR: " + err[:200]
+        print(f"  {field_name:<32} -> {errors[field_name][:150]}")
 
     print()
-    for k, v in errores.items():
+    for k, v in errors.items():
         print(f"  {k:<32} {v}")
     return 0
 

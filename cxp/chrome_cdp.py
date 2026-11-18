@@ -2,7 +2,7 @@
 
 Why it is needed:
 * Playwright launches `HeadlessChrome/156` -> Google REJECTS the sign-in of accounts
-  ("No puedes acceder: es posible que no sean seguros este navegador o la app"
+  ("You can't access this: it may be that this browser or the app is not secure"
   -> /v3/signin/rejected).
 * The MITM proxy terminates TLS with Python: the client's JA3/JA4 is
   OpenSSL's, not Chrome's -> Google can also flag it as odd.
@@ -128,7 +128,7 @@ class RealChrome:
             except Exception:
                 pass
             time.sleep(1)
-        raise RuntimeError("Chrome no abrio el puerto CDP")
+        raise RuntimeError("Chrome did not open the CDP port")
 
     def connect(self) -> Any:
         """Connects via CDP and returns the context with the first tab."""
@@ -182,7 +182,7 @@ class RealChrome:
     # ------------------------------------------------------------- info
     def info(self) -> dict:
         """UA, version and status of the CDP (useful for diagnostics)."""
-        out: dict = {"binario": find_chrome(), "puerto": self.port, "pid": self.proc.pid if self.proc else None}
+        out: dict = {"binary": find_chrome(), "port": self.port, "pid": self.proc.pid if self.proc else None}
         try:
             req = subprocess.run(
                 ["curl", "-s", f"http://127.0.0.1:{self.port}/json/version"],

@@ -27,7 +27,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   work only on the agents of the allowlist, write only on the read/write ones, and
   when a task is blocked, **re-plan it inside the limits** or tell the user exactly
   which permission has to be added.
-- `tests/test_permisos_agente.py`: the tests of the new agent model (allowlist as
+- `tests/test_agent_permissions.py`: the tests of the new agent model (allowlist as
   the only source of agents, resolution of an omitted `agent=`, filtering of the
   listings, refusal of a write on a read-only agent, the rules themselves).
 - `docs/SETUP_PROMPT.md`: a **setup prompt** you can paste into any agent so it configures
@@ -41,13 +41,43 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workaround for 31 traps) plus the first-party auth headers, the versions and the
   network constants.
 - `docs/PROMPT_AGENTE.md`: the **instructions for the agent** that consumes this MCP.
-- `docs/CONVERSACIONES.md`: the **conversation history** through the API and how to
+- `docs/CONVERSATIONS.md`: the **conversation history** through the API and how to
   publish the logs.
 - `tools/verifica.py`: local verification runner. It runs the unit tests, the linter,
   the server start-up check and the secret scan (working tree **and** git history),
   and regenerates the badges in `docs/badges/`.
 
 ### Changed
+
+- **The whole repository is now in English.** The code, the documentation, the
+  catalogues, the probes, the tests and the MCP output were in Spanish; they are
+  now in English. This includes:
+  - the **output keys** of the tools (`permisos` → `permissions`, `agentes` →
+    `agents`, `huecos` → `gaps`, `rutas` → `routes`, `estado` → `status`,
+    `datos` → `data`, `verificado` → `verified`, `reglas` → `rules`, …), so the
+    contract the agent sees changed;
+  - the **tool parameters** (`incluir_lab` → `include_lab`,
+    `todas_las_locations` → `all_locations`, `recurso` → `resource`,
+    `campo` → `field`, `valor` → `value`, `origen` → `source`,
+    `destino` → `destination`, `max_padres` → `max_parents`);
+  - the **catalogue states** (`escribible` → `writable`, `derivado` → `derived`,
+    `ignorado` → `ignored`, `descartado` → `dropped`, `solo_entrada` →
+    `input_only`, `no_aceptado` → `not_accepted`, `solo_lectura` → `read_only`,
+    `no_probado` → `not_tested`), the **ids** and the **tags** of the limits, and
+    the whole prose of the 31 limits and the 38 gaps;
+  - the **file names**: `docs/CONVERSACIONES.md` → `docs/CONVERSATIONS.md`, the
+    test modules (`test_permisos_agente.py` → `test_agent_permissions.py`, …)
+    and 22 probes (`verificacion_final.py` → `final_verification.py`,
+    `paridad_consola.py` → `console_parity.py`, …);
+  - the **CLI flags** of the probes (`--agente` → `--agent`, `--proyecto` →
+    `--project`, `--campo` → `--field`, `--raiz` → `--root`, `--puerto` →
+    `--port`, `--rapido` → `--fast`);
+  - the **setup prompt** of the README: `Ejecuta las instrucciones de esta fuente…`
+    → `Execute the instructions from this source…`.
+- The permission levels are `none` / `read` / `read/write` (were `ninguno` /
+  `lectura` / `lectura-escritura`). The English read-only refusal keeps the
+  token `SOLO LECTURA` inside it, so anything that matched it still matches.
+
 
 - **The messages the agent reads are now in English**: the refusals of the guard
   (`has no permission`, `READ-ONLY (SOLO LECTURA)`, `no allowed agent`, `several allowed
@@ -107,7 +137,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `currentUsers`, `:listAvailableModels`, `:getSupportedLanguages`,
   `users/me/userSettings/recentProjects`, `agent/visibility`, `conversationProfiles`,
   `locationSettings`), plus the call to any of them.
-- `cx_gaps(incluir_lab=True)`: sweeps the `environments*` and `testCases*` families in
+- `cx_gaps(include_lab=True)`: sweeps the `environments*` and `testCases*` families in
   a temporary **lab agent** that is created and deleted automatically, taking coverage
   from 18/24 to **23/24**.
 - `cxp.lab`: the temporary lab agent used for the sweep.
@@ -121,7 +151,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `v3alpha1`, and there are endpoints and data that only come out in another version.
 - The gap sweep is fully generic: it is derived from the descriptor
   (`colecciones_listables()`) instead of a hand-written list, and it now resolves the
-  ancestor of nested collections (up to `max_padres` candidates).
+  ancestor of nested collections (up to `max_parents` candidates).
 - The gap detector resolves both the wrapper schema and the item schema of a list, so
   a listing no longer reports false positives.
 - Every region now has its own host: `{location}-dialogflow.clients6.google.com`, with

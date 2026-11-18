@@ -17,12 +17,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 FRAME_URL = (
     "https://conversational-agents.cloud.google.com/cx/projects/{p}/locations/{l}/agents/{a}"
     "/flows/{f}?pageId={pg}&embedded=true"
@@ -70,34 +70,34 @@ def main() -> int:
     time.sleep(10)
 
     nodes = page.evaluate(JS_NODES)
-    objetivo = next((n for n in nodes if args.page_node in n["t"]), None)
-    if objetivo:
-        page.mouse.click(objetivo["x"], objetivo["y"])
+    target = next((n for n in nodes if args.page_node in n["t"]), None)
+    if target:
+        page.mouse.click(target["x"], target["y"])
         time.sleep(4)
     else:
         print(f"== the node {args.page_node!r} was not found; nodes={[n['t'] for n in nodes]}")
 
-    filas = page.evaluate(JS_ROWS)
-    print(f"== table rows: {len(filas)}")
-    for i, celdas in enumerate(filas):
-        print(f"  [{i}] " + " | ".join(c[:60] for c in celdas))
+    rows = page.evaluate(JS_ROWS)
+    print(f"== table rows: {len(rows)}")
+    for i, cells in enumerate(rows):
+        print(f"  [{i}] " + " | ".join(c[:60] for c in cells))
 
     # "Flat" version: condition -> transition
-    mapa = []
-    for celdas in filas:
-        if len(celdas) < 4:
+    mapping = []
+    for cells in rows:
+        if len(cells) < 4:
             continue
-        intent, cond, _fulfill, trans = celdas[0], celdas[1], celdas[2], celdas[3]
-        if not cond or cond.lower() in ("condition",):
+        intent, condition, _fulfill, transition = cells[0], cells[1], cells[2], cells[3]
+        if not condition or condition.lower() in ("condition",):
             continue
-        mapa.append({"condicion": cond, "transicion": trans, "intent": intent})
+        mapping.append({"condition": condition, "transition": transition, "intent": intent})
 
-    print(f"\n== map ({len(mapa)} routes)")
-    for m in mapa:
-        print(f"   {m['condicion'][:70]:72s} -> {m['transicion']}")
+    print(f"\n== map ({len(mapping)} routes)")
+    for m in mapping:
+        print(f"   {m['condition'][:70]:72s} -> {m['transition']}")
 
     if args.out:
-        Path(args.out).write_text(json.dumps(mapa, indent=1, ensure_ascii=False), encoding="utf-8")
+        Path(args.out).write_text(json.dumps(mapping, indent=1, ensure_ascii=False), encoding="utf-8")
         print(f"== written {args.out}")
     return 0
 

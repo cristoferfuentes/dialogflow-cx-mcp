@@ -20,7 +20,7 @@ This script:
   3. Creates the environment with `versionConfigs[].playbookConfigs`.
   4. DELETES it at the end (in a `finally`).
 
-    .venv/bin/python probes/exp_environment_playbook_configs.py [--agente <uuid>]
+    .venv/bin/python probes/exp_environment_playbook_configs.py [--agent <uuid>]
 """
 from __future__ import annotations
 
@@ -37,14 +37,14 @@ from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 
 
-def esperar(cons: ConsoleApi, op: dict, segundos: int = 120) -> dict:
+def wait_for(cons: ConsoleApi, op: dict, seconds: int = 120) -> dict:
     """Follows an LRO until it finishes."""
-    nombre = op.get("name")
-    if not nombre or op.get("done") or "/operations/" not in nombre:
+    name = op.get("name")
+    if not name or op.get("done") or "/operations/" not in name:
         return op
-    for _ in range(segundos * 2):
+    for _ in range(seconds * 2):
         time.sleep(0.5)
-        op = cons.request("GET", cons._url("/" + nombre))
+        op = cons.request("GET", cons._url("/" + name))
         if op.get("done"):
             return op
     return op
@@ -54,9 +54,9 @@ def playbooks_de_flow(cons: ConsoleApi, base: str, fid: str) -> list[str]:
     """Playbooks referenced by a flow (pages) + transitive closure."""
     refs: set[str] = set()
     # (a) the PAGES of the flow
-    paginas = cons.request("GET", cons._url(f"{base}/flows/{fid}/pages",
+    pages = cons.request("GET", cons._url(f"{base}/flows/{fid}/pages",
                                             pageSize="100"))
-    for pg in (paginas.get("pages") or []):
+    for pg in (pages.get("pages") or []):
         for tr in (pg.get("transitionRoutes") or []):
             tp = tr.get("targetPlaybook")
             if tp:
@@ -68,54 +68,54 @@ def playbooks_de_flow(cons: ConsoleApi, base: str, fid: str) -> list[str]:
         if tp:
             refs.add(tp)
     # (c) transitive closure: one playbook can reference another.
-    cola = list(refs)
-    while cola:
-        nombre = cola.pop()
+    queue = list(refs)
+    while queue:
+        name = queue.pop()
         try:
-            pb = cons.request("GET", cons._url("/" + nombre))
+            pb = cons.request("GET", cons._url("/" + name))
         except Exception:
             continue
         for ref in (pb.get("referencedPlaybooks") or []):
             if ref and ref not in refs:
                 refs.add(ref)
-                cola.append(ref)
+                queue.append(ref)
     return sorted(refs)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
-    ap.add_argument("--solo-playbooks", action="store_true",
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
+    ap.add_argument("--only-playbooks", action="store_true",
                     help="does not create the environment: only measures the playbook closure")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
-    base = f"/projects/{proyecto}/locations/{cfg.location}/agents/{agente}"
+    base = f"/projects/{project}/locations/{cfg.location}/agents/{agent}"
 
     flows = cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
     lista = flows.get("flows") or []
-    print(f"agent {agente}: {len(lista)} flows")
+    print(f"agent {agent}: {len(lista)} flows")
 
     # ------------------------------------------------- versions + playbooks
     plan: list[dict] = []
     for f in lista:
         fid = f["name"].rsplit("/", 1)[-1]
-        existentes = cons.request("GET", cons._url(f"{base}/flows/{fid}/versions",
+        existing = cons.request("GET", cons._url(f"{base}/flows/{fid}/versions",
                                                    pageSize="10"))
-        previas = existentes.get("versions") or []
-        if previas:
-            version = previas[0]["name"]
+        existing_versions = existing.get("versions") or []
+        if existing_versions:
+            version = existing_versions[0]["name"]
         else:
-            op = esperar(cons, cons.request(
+            op = wait_for(cons, cons.request(
                 "POST", cons._url(f"{base}/flows/{fid}/versions"),
                 body={"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
-                      "description": "temporal: experimento de entorno"}))
-            resp = op.get("response") or {}
-            version = resp.get("name") or ""
+                      "description": "temporary: environment experiment"}))
+            response = op.get("response") or {}
+            version = response.get("name") or ""
             if not version:
                 print(f"  {f.get('displayName')}: could not be versioned "
                       f"({op.get('error')})")
@@ -123,14 +123,14 @@ def main() -> int:
         refs = playbooks_de_flow(cons, base, fid)
         plan.append({"flow": f.get("displayName"), "version": version,
                      "playbooks": refs})
-        marca = f"  {f.get('displayName')}: version ok, {len(refs)} playbook(s)"
+        mark = f"  {f.get('displayName')}: version ok, {len(refs)} playbook(s)"
         if refs:
-            marca += f" -> {[r.rsplit('/', 1)[-1][:8] for r in refs]}"
-        print(marca)
+            mark += f" -> {[r.rsplit('/', 1)[-1][:8] for r in refs]}"
+        print(mark)
 
-    total_pb = {p for v in plan for p in v["playbooks"]}
-    print(f"\nreferenced playbooks in total: {len(total_pb)}")
-    if args.solo_playbooks:
+    total_playbooks = {p for v in plan for p in v["playbooks"]}
+    print(f"\nreferenced playbooks in total: {len(total_playbooks)}")
+    if args.only_playbooks:
         return 0
 
     # ------------------------------------------------------------- environment
@@ -138,28 +138,28 @@ def main() -> int:
     for vc, v in zip(version_configs, plan, strict=True):
         if v["playbooks"]:
             vc["playbookConfigs"] = [{"playbook": p} for p in v["playbooks"]]
-    cuerpo = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
-              "description": "temporal: experimento de entorno",
+    body = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
+              "description": "temporary: environment experiment",
               "versionConfigs": version_configs}
     print("\nversionConfigs[0]:", json.dumps(version_configs[0], ensure_ascii=False))
 
-    op = esperar(cons, cons.request("POST", cons._url(f"{base}/environments"),
-                                     body=cuerpo))
-    resp = op.get("response") or {}
-    entorno = resp.get("name") or ""
-    if not entorno:
+    op = wait_for(cons, cons.request("POST", cons._url(f"{base}/environments"),
+                                     body=body))
+    response = op.get("response") or {}
+    environment = response.get("name") or ""
+    if not environment:
         print("Could NOT create the environment:", json.dumps(op.get("error"),
                                                                 ensure_ascii=False)[:500])
         return 1
-    print("environment:", entorno)
+    print("environment:", environment)
 
     try:
-        ent = cons.request("GET", cons._url("/" + entorno))
+        ent = cons.request("GET", cons._url("/" + environment))
         print("environment fields:", sorted(ent.keys()))
         print(json.dumps(ent.get("versionConfigs"), ensure_ascii=False)[:600])
     finally:
         try:
-            cons.request("DELETE", cons._url("/" + entorno))
+            cons.request("DELETE", cons._url("/" + environment))
             print("temporary environment deleted")
         except Exception as exc:
             print("Could NOT delete the environment:", str(exc)[:200])

@@ -5,7 +5,7 @@
 # start, so the URL may change if the service is restarted.
 # This script says which one it is right now.
 #
-#   probes/url_publica.sh
+#   probes/public_url.sh
 set -uo pipefail
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="${CXP_LOGS_DIR:-$RAIZ/logs-conversaciones}"

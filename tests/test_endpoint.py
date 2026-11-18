@@ -1,18 +1,18 @@
-"""Tests de la resolucion de rutas y versiones (`cxp/endpoint.py`).
+"""Tests of the route and version resolution (`cxp/endpoint.py`).
 
-No necesitan red: es logica pura.
+They need no network: it is pure logic.
 """
 from __future__ import annotations
 
 import pytest
 
 from cxp.endpoint import (
-    VERSIONES_SERVIDAS,
+    SERVED_VERSIONS,
     PathError,
-    es_absoluta,
+    is_absolute,
     resolve_path,
     split_version,
-    url_de,
+    url_for,
 )
 
 
@@ -26,99 +26,99 @@ def test_split_version():
     assert split_version("") == ("", "")
 
 
-def test_split_version_no_confunde_un_prefijo_similar():
-    # Una palabra que empieza por 'v' pero NO lleva digitos no es version.
+def test_split_version_does_not_confuse_a_similar_prefix():
+    # A word that starts with 'v' but carries NO digits is not a version.
     assert split_version("vertices") == ("vertices", "")
-    # Con digitos SI es una version (aunque no exista): se comprueba al
-    # resolver, no al trocear.
+    # With digits it IS a version (even if it does not exist): that is checked
+    # when resolving, not when splitting.
     assert split_version("v3beta") == ("", "v3beta")
     assert split_version("v3") == ("", "v3")
 
 
-def test_versiones_servidas():
-    assert "v3beta1" in VERSIONES_SERVIDAS
-    assert "v3alpha1" in VERSIONES_SERVIDAS
-    assert "v3" in VERSIONES_SERVIDAS
-    assert "v2beta1" in VERSIONES_SERVIDAS
+def test_the_served_versions():
+    assert "v3beta1" in SERVED_VERSIONS
+    assert "v3alpha1" in SERVED_VERSIONS
+    assert "v3" in SERVED_VERSIONS
+    assert "v2beta1" in SERVED_VERSIONS
 
 
-# ------------------------------------------------------------------ rutas
-def test_ruta_relativa_antepone_proyecto_y_location():
-    ruta, version, q = resolve_path("agents/{agent}/flows", project="p",
+# ------------------------------------------------------------------ routes
+def test_a_relative_route_prepends_project_and_location():
+    route, version, q = resolve_path("agents/{agent}/flows", project="p",
                                      location="global", agent="a")
-    assert ruta == "projects/p/locations/global/agents/a/flows"
+    assert route == "projects/p/locations/global/agents/a/flows"
     assert version == "v3beta1"
     assert q == {}
 
 
-def test_ruta_absoluta_de_proyecto_no_se_toca():
-    ruta, _, _ = resolve_path("projects/otro/agent/visibility", project="p",
+def test_an_absolute_project_route_is_not_touched():
+    route, _, _ = resolve_path("projects/other/agent/visibility", project="p",
                               location="global")
-    assert ruta == "projects/otro/agent/visibility"
+    assert route == "projects/other/agent/visibility"
 
 
-def test_ruta_absoluta_desde_la_raiz():
-    ruta, _, _ = resolve_path("/users/me/userSettings/recentProjects",
+def test_an_absolute_route_from_the_root():
+    route, _, _ = resolve_path("/users/me/userSettings/recentProjects",
                               project="p", location="global")
-    assert ruta == "users/me/userSettings/recentProjects"
+    assert route == "users/me/userSettings/recentProjects"
 
 
-def test_la_version_de_la_ruta_gana_a_la_del_parametro():
+def test_the_version_of_the_route_wins_over_the_parameter_one():
     _, version, _ = resolve_path("v3alpha1/projects/p/x", version="v3beta1",
                                   project="p", location="global")
     assert version == "v3alpha1"
 
 
-def test_el_parametro_version_gana_al_por_defecto():
+def test_the_version_parameter_wins_over_the_default_one():
     _, version, _ = resolve_path("projects/p/x", version="v2beta1",
                                   project="p", location="global")
     assert version == "v2beta1"
 
 
-def test_nombre_completo_como_valor_de_name():
-    nombre = "projects/p/locations/global/agents/a/flows/f"
-    ruta, _, _ = resolve_path("{+name}", name=nombre, project="p", location="global")
-    assert ruta == nombre
+def test_the_full_name_as_the_name_value():
+    name = "projects/p/locations/global/agents/a/flows/f"
+    route, _, _ = resolve_path("{+name}", name=name, project="p", location="global")
+    assert route == name
 
 
-def test_placeholders_de_path():
-    ruta, _, _ = resolve_path("projects/{project}/locations/{location}/agents/{agent}",
+def test_the_path_placeholders():
+    route, _, _ = resolve_path("projects/{project}/locations/{location}/agents/{agent}",
                               project="p", location="global", agent="a")
-    assert ruta == "projects/p/locations/global/agents/a"
+    assert route == "projects/p/locations/global/agents/a"
 
 
-def test_faltan_parametros_da_error():
+def test_missing_parameters_raise_an_error():
     with pytest.raises(PathError):
         resolve_path("projects/{project}/agents/{agent}", project="",
                      location="global", agent="")
 
 
-def test_ruta_relativa_sin_proyecto_da_error():
+def test_a_relative_route_without_a_project_raises_an_error():
     with pytest.raises(PathError):
         resolve_path("agents/{agent}/flows", project="", location="global",
                      agent="a")
 
 
-def test_ruta_vacia_da_error():
+def test_an_empty_route_raises_an_error():
     with pytest.raises(PathError):
         resolve_path("", project="p", location="global")
 
 
-def test_es_absoluta():
-    assert es_absoluta("/users/me")
-    assert es_absoluta("projects/p/x")
-    assert not es_absoluta("agents/{agent}/flows")
+def test_is_absolute():
+    assert is_absolute("/users/me")
+    assert is_absolute("projects/p/x")
+    assert not is_absolute("agents/{agent}/flows")
 
 
-def test_params_no_usados_en_la_ruta_van_a_la_query():
-    ruta, _, q = resolve_path("projects/p/locations/global/agents/a/intents",
+def test_the_params_not_used_in_the_route_go_to_the_query():
+    route, _, q = resolve_path("projects/p/locations/global/agents/a/intents",
                               project="p", location="global",
                               params={"languageCode": "es", "pageSize": "10"})
-    assert ruta == "projects/p/locations/global/agents/a/intents"
+    assert route == "projects/p/locations/global/agents/a/intents"
     assert q == {"languageCode": "es", "pageSize": "10"}
 
 
-def test_params_usados_en_la_ruta_no_van_a_la_query():
+def test_the_params_used_in_the_route_do_not_go_to_the_query():
     _, _, q = resolve_path("agents/{agent}/flows/{flow}",
                             project="p", location="global",
                             params={"agent": "a", "flow": "f"})
@@ -126,10 +126,10 @@ def test_params_usados_en_la_ruta_no_van_a_la_query():
 
 
 # -------------------------------------------------------------------- url
-def test_url_de():
-    url = url_de("v3alpha1", "projects/p/x", "host.example", {"a": "1"}, key="K")
+def test_url_for():
+    url = url_for("v3alpha1", "projects/p/x", "host.example", {"a": "1"}, key="K")
     assert url == "https://host.example/v3alpha1/projects/p/x?a=1&key=K"
 
 
-def test_url_de_sin_query():
-    assert url_de("v3", "x", "h") == "https://h/v3/x"
+def test_url_for_without_a_query():
+    assert url_for("v3", "x", "h") == "https://h/v3/x"

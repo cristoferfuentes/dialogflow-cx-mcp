@@ -5,7 +5,7 @@ The sweeps create environments, test cases and temporary playbook/tool
 versions; all of them are deleted, but it has to be VERIFIED (lesson 2026-11-13:
 "the detector does not see it" -> you have to look).
 
-    .venv/bin/python probes/verifica_temporales.py
+    .venv/bin/python probes/verify_temporaries.py
 """
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def main() -> int:
 
     entornos = (cons.request("GET", cons._url(f"{base}/environments"))
                 .get("environments") or [])
-    casos = (cons.request("GET", cons._url(f"{base}/testCases", pageSize="100"))
+    cases = (cons.request("GET", cons._url(f"{base}/testCases", pageSize="100"))
              .get("testCases") or [])
     print(f"environments: {len(entornos)}")
-    print(f"testCases: {len(casos)}")
+    print(f"testCases: {len(cases)}")
 
     pb_con = []
     pbs = (cons.request("GET", cons._url(f"{base}/playbooks", pageSize="100"))
@@ -57,19 +57,19 @@ def main() -> int:
 
     flows = (cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
              .get("flows") or [])
-    versiones = 0
+    versions = 0
     for f in flows:
         fid = f["name"].rsplit("/", 1)[-1]
-        versiones += len(cons.request(
+        versions += len(cons.request(
             "GET", cons._url(f"{base}/flows/{fid}/versions", pageSize="50"))
             .get("versions") or [])
-    print(f"flow versions: {versiones} in {len(flows)} flows")
+    print(f"flow versions: {versions} in {len(flows)} flows")
 
     # Lab agents: there should not be any left with the name zz_tmp_lab
-    todos = (cons.request("GET", cons._url(
+    all_agents = (cons.request("GET", cons._url(
         f"/projects/{cfg.project}/locations/{cfg.location}/agents", pageSize="100"))
         .get("agents") or [])
-    labs = [a.get("displayName") for a in todos
+    labs = [a.get("displayName") for a in all_agents
             if str(a.get("displayName", "")).startswith("zz_tmp_lab")]
     print(f"lab agents left: {labs}")
     return 0

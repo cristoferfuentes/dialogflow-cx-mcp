@@ -1,7 +1,7 @@
-"""Tests del catalogo de huecos de METODO (`cxp/console_endpoints.py`).
+"""Tests of the METHOD gap catalogue (`cxp/console_endpoints.py`).
 
-El catalogo es un dato MEDIDO: estos tests comprueban que no se rompa y que
-los numeros que afirma sigan cuadrando con el descriptor real.
+The catalogue is MEASURED data: these tests check that it does not break and
+that the numbers it states still add up with the real descriptor.
 """
 from __future__ import annotations
 
@@ -10,101 +10,101 @@ from pathlib import Path
 import pytest
 
 from cxp.console_endpoints import (
-    HUECOS_METODO,
-    METODOS_POR_VERSION,
-    _ids_de,
-    catalogo_metodos,
-    huecos_de_metodo,
+    METHOD_GAPS,
+    METHODS_BY_VERSION,
+    _ids_of,
+    method_catalogue,
+    method_gaps,
 )
 from cxp.gaps import SchemaIndex
 
-RAIZ = Path(__file__).resolve().parent.parent
-DISCOVERY = RAIZ / ".discovery"
+ROOT = Path(__file__).resolve().parent.parent
+DISCOVERY = ROOT / ".discovery"
 
 
-# --------------------------------------------------------------- el catalogo
-def test_el_catalogo_no_esta_vacio():
-    assert len(HUECOS_METODO) >= 8
+# ------------------------------------------------------------- the catalogue
+def test_the_catalogue_is_not_empty():
+    assert len(METHOD_GAPS) >= 8
 
 
-def test_cada_endpoint_tiene_lo_minimo():
-    for h in HUECOS_METODO:
+def test_every_endpoint_has_the_minimum():
+    for h in METHOD_GAPS:
         assert h["id"]
-        assert h["version"] in METODOS_POR_VERSION or h["version"] == "v2beta1"
-        assert h["metodo"] in ("GET", "POST", "PATCH", "DELETE")
-        # Las rutas cuelgan de un proyecto, de la raiz (`users/`) o son la
-        # coleccion de proyectos de la RAIZ del backend (`projects`).
+        assert h["version"] in METHODS_BY_VERSION or h["version"] == "v2beta1"
+        assert h["method"] in ("GET", "POST", "PATCH", "DELETE")
+        # The routes hang from a project, from the root (`users/`) or they are
+        # the collection of projects of the ROOT of the backend (`projects`).
         assert (h["path"].startswith("projects/") or h["path"].startswith("users/")
                 or h["path"] == "projects")
-        assert h["estado"] in ("verificado", "sin_datos", "error")
-        assert h["para_que"]
+        assert h["status"] in ("verified", "no_data", "error")
+        assert h["purpose"]
 
 
-def test_projects_list_es_un_endpoint_de_la_raiz():
-    """MEDIDO (2026-11-15): el listado de proyectos vive en la raiz del
-    backend (`/v3alpha1/projects`), no bajo un proyecto: por eso el MCP lo
-    resuelve como ruta ABSOLUTA."""
-    p = next(h for h in HUECOS_METODO if h["id"] == "projects.list")
+def test_projects_list_is_an_endpoint_of_the_root():
+    """MEASURED (2026-11-15): the listing of projects lives in the root of the
+    backend (`/v3alpha1/projects`), not under a project: that is why the MCP
+    resolves it as an ABSOLUTE route."""
+    p = next(h for h in METHOD_GAPS if h["id"] == "projects.list")
     assert p["path"] == "projects"
     assert p["version"] == "v3alpha1"
 
 
-def test_los_ids_son_unicos():
-    ids = [h["id"] for h in HUECOS_METODO]
+def test_the_ids_are_unique():
+    ids = [h["id"] for h in METHOD_GAPS]
     assert len(ids) == len(set(ids))
 
 
-def test_catalogo_metodos_devuelve_copias():
-    a = catalogo_metodos()
-    a[0]["id"] = "tocada"
-    b = catalogo_metodos()
-    assert b[0]["id"] != "tocada"
+def test_the_method_catalogue_returns_copies():
+    a = method_catalogue()
+    a[0]["id"] = "touched"
+    b = method_catalogue()
+    assert b[0]["id"] != "touched"
 
 
-def test_las_rutas_absolutas_no_cuelgan_de_un_proyecto():
-    # `users/me/...` es una ruta desde la raiz del backend: por eso el MCP
-    # necesita resolver rutas absolutas.
-    recientes = next(h for h in HUECOS_METODO if h["id"] == "users.recentProjects")
-    assert recientes["path"].startswith("users/")
+def test_the_absolute_routes_do_not_hang_from_a_project():
+    # `users/me/...` is a route from the root of the backend: that is why the
+    # MCP has to resolve absolute routes.
+    recent = next(h for h in METHOD_GAPS if h["id"] == "users.recentProjects")
+    assert recent["path"].startswith("users/")
 
 
-# ------------------------------------------------------- contra el descriptor
+# ------------------------------------------------------ against the descriptor
 @pytest.mark.skipif(not (DISCOVERY / "v3beta1.json").exists(),
-                    reason="no hay discovery doc cacheado")
-def test_los_numeros_de_metodos_cuadran():
+                    reason="no cached discovery doc")
+def test_the_method_counts_add_up():
     idx = SchemaIndex.load(DISCOVERY / "v3beta1.json", version="v3beta1")
-    assert len(_ids_de(idx)) == METODOS_POR_VERSION["v3beta1"] == 162
+    assert len(_ids_of(idx)) == METHODS_BY_VERSION["v3beta1"] == 162
 
 
 @pytest.mark.skipif(not (DISCOVERY / "v3alpha1.json").exists(),
-                    reason="no hay discovery doc cacheado")
-def test_v3beta1_es_el_superconjunto():
+                    reason="no cached discovery doc")
+def test_v3beta1_is_the_superset():
     betas = SchemaIndex.load(DISCOVERY / "v3beta1.json", version="v3beta1")
     alpha = SchemaIndex.load(DISCOVERY / "v3alpha1.json", version="v3alpha1")
-    ids_betas = _ids_de(betas)
-    ids_alpha = _ids_de(alpha)
-    assert len(ids_alpha) == METODOS_POR_VERSION["v3alpha1"] == 8
-    # Ningun metodo de v3alpha1 falta en v3beta1.
+    ids_betas = _ids_of(betas)
+    ids_alpha = _ids_of(alpha)
+    assert len(ids_alpha) == METHODS_BY_VERSION["v3alpha1"] == 8
+    # No method of v3alpha1 is missing in v3beta1.
     assert not (ids_alpha - ids_betas)
 
 
 @pytest.mark.skipif(not (DISCOVERY / "v3.json").exists(),
-                    reason="no hay discovery doc cacheado")
-def test_v3_tiene_cuatro_metodos_menos():
+                    reason="no cached discovery doc")
+def test_v3_has_four_methods_less():
     betas = SchemaIndex.load(DISCOVERY / "v3beta1.json", version="v3beta1")
     v3 = SchemaIndex.load(DISCOVERY / "v3.json", version="v3")
-    assert len(_ids_de(v3)) == METODOS_POR_VERSION["v3"] == 158
-    assert len(_ids_de(betas) - _ids_de(v3)) == 4
+    assert len(_ids_of(v3)) == METHODS_BY_VERSION["v3"] == 158
+    assert len(_ids_of(betas) - _ids_of(v3)) == 4
 
 
 @pytest.mark.skipif(not (DISCOVERY / "v3beta1.json").exists(),
-                    reason="no hay discovery doc cacheado")
-def test_huecos_de_metodo_entre_versions():
+                    reason="no cached discovery doc")
+def test_method_gaps_between_versions():
     betas = SchemaIndex.load(DISCOVERY / "v3beta1.json", version="v3beta1")
     v3 = SchemaIndex.load(DISCOVERY / "v3.json", version="v3")
-    # Los ids se sacan del MISMO descriptor (el de la version pedida).
-    res = huecos_de_metodo(betas, "v3beta1", "v3beta1")
-    assert res["solo_en_version"] == []
-    assert res["solo_en_contra"] == []
-    # El doc de v3 tiene 4 metodos menos: se ve al comparar docs.
-    assert len(_ids_de(betas) - _ids_de(v3)) == 4
+    # The ids are taken from the SAME descriptor (the one of the version asked).
+    res = method_gaps(betas, "v3beta1", "v3beta1")
+    assert res["only_in_version"] == []
+    assert res["only_in_against"] == []
+    # The doc of v3 has 4 methods less: it shows when comparing docs.
+    assert len(_ids_of(betas) - _ids_of(v3)) == 4

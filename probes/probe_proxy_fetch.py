@@ -15,14 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agente, targets_de_sonda
-from _redact import escribe_json_privado
+from _entorno import agent, probe_targets
+from _redact import write_json_private
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
-ORIG = agente("por_defecto")
-_TARGET = next(iter(targets_de_sonda().values()), {"flow": "", "page": ""})
+ORIG = agent("default")
+_TARGET = next(iter(probe_targets().values()), {"flow": "", "page": ""})
 OF = _TARGET["flow"]
 OP = _TARGET["page"]
 
@@ -87,7 +87,7 @@ def main() -> int:
             print(f"    {k}: {v[:150]}")
         print("    cookies:", [c["name"] for c in w["associatedCookies"]][:30])
 
-    escribe_json_privado("/tmp/wire.json", wire)
+    write_json_private("/tmp/wire.json", wire)
     return 0
 
 

@@ -21,75 +21,83 @@ from typing import Any
 from .gaps import apply_path, read_path, strip_derived, top_level_keys
 
 
-def _recortar(valor: Any, limite: int = 300) -> Any:
+def _truncate(value: Any, limit: int = 300) -> Any:
     import json
     try:
-        texto = json.dumps(valor, ensure_ascii=False)
+        text = json.dumps(value, ensure_ascii=False)
     except (TypeError, ValueError):
-        texto = str(valor)
-    return texto[:limite] + "..." if len(texto) > limite else valor
+        text = str(value)
+    return text[:limit] + "..." if len(text) > limit else value
 
 
-def diff_json(antes: Any, despues: Any, prefijo: str = "") -> list[dict[str, Any]]:
-    """Differences between two structures, in `{ruta, antes, despues}` form."""
-    cambios: list[dict[str, Any]] = []
-    if isinstance(antes, dict) and isinstance(despues, dict):
-        for clave in sorted(set(antes) | set(despues)):
-            ruta = f"{prefijo}.{clave}" if prefijo else clave
-            if clave not in antes:
-                cambios.append({"ruta": ruta, "antes": None, "despues": _recortar(despues[clave])})
-            elif clave not in despues:
-                cambios.append({"ruta": ruta, "antes": _recortar(antes[clave]), "despues": None})
+def diff_json(before: Any, after: Any, prefix: str = "") -> list[dict[str, Any]]:
+    """Differences between two structures, in `{route, before, after}` form."""
+    changes: list[dict[str, Any]] = []
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key in sorted(set(before) | set(after)):
+            route = f"{prefix}.{key}" if prefix else key
+            if key not in before:
+                changes.append({"route": route, "before": None,
+                                "after": _truncate(after[key])})
+            elif key not in after:
+                changes.append({"route": route, "before": _truncate(before[key]),
+                                "after": None})
             else:
-                cambios.extend(diff_json(antes[clave], despues[clave], ruta))
-        return cambios
-    if isinstance(antes, list) and isinstance(despues, list):
-        for i in range(max(len(antes), len(despues))):
-            ruta = f"{prefijo}[{i}]"
-            if i >= len(antes):
-                cambios.append({"ruta": ruta, "antes": None, "despues": _recortar(despues[i])})
-            elif i >= len(despues):
-                cambios.append({"ruta": ruta, "antes": _recortar(antes[i]), "despues": None})
+                changes.extend(diff_json(before[key], after[key], route))
+        return changes
+    if isinstance(before, list) and isinstance(after, list):
+        for i in range(max(len(before), len(after))):
+            route = f"{prefix}[{i}]"
+            if i >= len(before):
+                changes.append({"route": route, "before": None,
+                                "after": _truncate(after[i])})
+            elif i >= len(after):
+                changes.append({"route": route, "before": _truncate(before[i]),
+                                "after": None})
             else:
-                cambios.extend(diff_json(antes[i], despues[i], ruta))
-        return cambios
-    if antes != despues:
-        cambios.append({"ruta": prefijo or "$", "antes": _recortar(antes),
-                        "despues": _recortar(despues)})
-    return cambios
+                changes.extend(diff_json(before[i], after[i], route))
+        return changes
+    if before != after:
+        changes.append({"route": prefix or "$", "before": _truncate(before),
+                        "after": _truncate(after)})
+    return changes
 
 
 @dataclass
-class Resultado:
-    recurso: str
-    campo: str
-    valor: Any
-    escrito: bool = False
-    verificado: bool = False
-    mascara: list[str] = field(default_factory=list)
-    antes: Any = None
-    despues: Any = None
-    cambios: list[dict[str, Any]] = field(default_factory=list)
-    perdidas: list[str] = field(default_factory=list)
+class Result:
+    """The outcome of a `set_field`: what was asked, what was saved, what was lost."""
+    resource: str
+    field: str
+    value: Any
+    saved: bool = False
+    verified: bool = False
+    update_mask: list[str] = field(default_factory=list)
+    before: Any = None
+    after: Any = None
+    changes: list[dict[str, Any]] = field(default_factory=list)
+    dropped: list[str] = field(default_factory=list)
     error: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
-            "recurso": self.recurso,
-            "campo": self.campo,
-            "valor": _recortar(self.valor),
-            "mascara_update": self.mascara,
-            "escrito": self.escrito,
-            "verificado": self.verificado,
+            "resource": self.resource,
+            "field": self.field,
+            "value": _truncate(self.value),
+            "update_mask": self.update_mask,
+            # The same list under the camelCase name the API uses for the query
+            # parameter: the docs quote `updateMask`.
+            "updateMask": self.update_mask,
+            "saved": self.saved,
+            "verified": self.verified,
         }
-        if self.antes is not None:
-            d["valor_antes"] = _recortar(self.antes)
-        if self.despues is not None:
-            d["valor_despues"] = _recortar(self.despues)
-        if self.cambios:
-            d["cambios"] = self.cambios[:40]
-        if self.perdidas:
-            d["descartado_por_el_servidor"] = self.perdidas
+        if self.before is not None:
+            d["value_before"] = _truncate(self.before)
+        if self.after is not None:
+            d["value_after"] = _truncate(self.after)
+        if self.changes:
+            d["changes"] = self.changes[:40]
+        if self.dropped:
+            d["dropped_by_the_server"] = self.dropped
         if self.error:
             d["error"] = self.error
         return d
@@ -98,7 +106,7 @@ class Resultado:
 def set_field(api, resource_name: str, path: str, value: Any, *,
               dry_run: bool = True, project: str = "",
               language_code: str | None = None,
-              campos_extra: tuple[str, ...] = ()) -> Resultado:
+              extra_fields: tuple[str, ...] = ()) -> Result:
     """Write `value` to `path` of resource `resource_name`.
 
     `resource_name` is the complete `name` returned by the API
@@ -106,61 +114,61 @@ def set_field(api, resource_name: str, path: str, value: Any, *,
     ANY agent resource without writing a method per type.
 
     `path` is a route with indices: `transitionRoutes[0].targetPlaybook`."""
-    res = Resultado(recurso=resource_name, campo=path, valor=value)
+    res = Result(resource=resource_name, field=path, value=value)
     try:
-        antes = api.request("GET", api._url("/" + resource_name))
+        before = api.request("GET", api._url("/" + resource_name))
     except Exception as exc:
-        res.error = f"no se pudo leer el recurso: {exc}"
+        res.error = f"could not read the resource: {exc}"
         return res
 
-    valor_antes = read_path(antes, path)
-    res.antes = valor_antes
+    value_before = read_path(before, path)
+    res.before = value_before
 
     if dry_run:
         # Shows what WOULD PASS, without writing.
-        simulado = copy.deepcopy(antes)
+        simulated = copy.deepcopy(before)
         try:
-            apply_path(simulado, path, value)
+            apply_path(simulated, path, value)
         except ValueError as exc:
             res.error = str(exc)
             return res
-        res.despues = read_path(simulado, path)
-        res.mascara = top_level_keys(path)
-        res.cambios = diff_json(antes, simulado)
+        res.after = read_path(simulated, path)
+        res.update_mask = top_level_keys(path)
+        res.changes = diff_json(before, simulated)
         return res
 
-    cuerpo = strip_derived(copy.deepcopy(antes), extra=campos_extra)
+    body = strip_derived(copy.deepcopy(before), extra=extra_fields)
     try:
-        apply_path(cuerpo, path, value)
+        apply_path(body, path, value)
     except ValueError as exc:
         res.error = str(exc)
         return res
 
-    mascara = top_level_keys(path)
-    res.mascara = mascara
+    mask = top_level_keys(path)
+    res.update_mask = mask
     try:
-        api.patch_resource(resource_name, cuerpo, update_mask=",".join(mascara),
+        api.patch_resource(resource_name, body, update_mask=",".join(mask),
                            language_code=language_code, project=project)
-        res.escrito = True
+        res.saved = True
     except Exception as exc:
-        res.error = f"fallo el PATCH: {exc}"
+        res.error = f"the PATCH failed: {exc}"
         return res
 
     try:
-        despues = api.request("GET", api._url("/" + resource_name))
+        after = api.request("GET", api._url("/" + resource_name))
     except Exception as exc:
-        res.error = f"se escribio pero no se pudo releer: {exc}"
+        res.error = f"it was written but could not be read back: {exc}"
         return res
 
-    res.despues = read_path(despues, path)
-    res.verificado = res.despues == value
-    res.cambios = diff_json(antes, despues)
+    res.after = read_path(after, path)
+    res.verified = res.after == value
+    res.changes = diff_json(before, after)
     # What was asked to be written and the server did NOT save.
-    perdidas = []
-    if not res.verificado:
-        perdidas.append(path)
-    for cambio in res.cambios:
-        if cambio["ruta"].startswith(path.split("[")[0]) and cambio["despues"] is None:
-            perdidas.append(cambio["ruta"])
-    res.perdidas = sorted(set(perdidas))
+    lost = []
+    if not res.verified:
+        lost.append(path)
+    for change in res.changes:
+        if change["route"].startswith(path.split("[")[0]) and change["after"] is None:
+            lost.append(change["route"])
+    res.dropped = sorted(set(lost))
     return res

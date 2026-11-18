@@ -9,7 +9,7 @@ the environment".
 => With a garbage value you can **tell "unknown field" from "known field"**
 without creating any playbook and without creating any environment.
 
-    .venv/bin/python probes/exp_env_playbook_disco.py
+    .venv/bin/python probes/exp_env_playbook_disk.py
 """
 from __future__ import annotations
 
@@ -26,13 +26,13 @@ from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 
 
-def esperar(cons: ConsoleApi, op: dict, segundos: int = 90) -> dict:
-    nombre = op.get("name")
-    if not nombre or op.get("done") or "/operations/" not in nombre:
+def wait_for(cons: ConsoleApi, op: dict, seconds: int = 90) -> dict:
+    name = op.get("name")
+    if not name or op.get("done") or "/operations/" not in name:
         return op
-    for _ in range(segundos * 2):
+    for _ in range(seconds * 2):
         time.sleep(0.5)
-        op = cons.request("GET", cons._url("/" + nombre))
+        op = cons.request("GET", cons._url("/" + name))
         if op.get("done"):
             return op
     return op
@@ -53,66 +53,66 @@ CANDIDATOS: list[tuple[str, str, object]] = [
     ("versionConfigs", "playbookVersions", [BASURA]),
     ("versionConfigs", "playbooksToInclude", [BASURA]),
     ("versionConfigs", "playbook", BASURA),
-    ("raiz", "playbookConfigs", [{"playbook": BASURA}]),
-    ("raiz", "playbooks", [BASURA]),
-    ("raiz", "includedPlaybooks", [BASURA]),
-    ("raiz", "playbookNames", [BASURA]),
-    ("raiz", "playbookVersions", [BASURA]),
-    ("raiz", "referencedPlaybooks", [BASURA]),
+    ("root", "playbookConfigs", [{"playbook": BASURA}]),
+    ("root", "playbooks", [BASURA]),
+    ("root", "includedPlaybooks", [BASURA]),
+    ("root", "playbookNames", [BASURA]),
+    ("root", "playbookVersions", [BASURA]),
+    ("root", "referencedPlaybooks", [BASURA]),
 ]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
-    base = f"/projects/{proyecto}/locations/{cfg.location}/agents/{agente}"
+    base = f"/projects/{project}/locations/{cfg.location}/agents/{agent}"
 
     flows = cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
-    pares = []
+    pairs = []
     for f in (flows.get("flows") or []):
         fid = f["name"].rsplit("/", 1)[-1]
         v = cons.request("GET", cons._url(f"{base}/flows/{fid}/versions", pageSize="5"))
         vs = v.get("versions") or []
         if vs:
-            pares.append(vs[0]["name"])
-    print(f"versions: {len(pares)}")
+            pairs.append(vs[0]["name"])
+    print(f"versions: {len(pairs)}")
 
     print()
-    for donde, campo, valor in CANDIDATOS:
-        vcs = [{"version": v} for v in pares]
-        if donde == "versionConfigs":
-            vcs[0][campo] = valor
-        cuerpo = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
-                  "description": "temporal: buscar el campo",
+    for where, field, value in CANDIDATOS:
+        vcs = [{"version": v} for v in pairs]
+        if where == "versionConfigs":
+            vcs[0][field] = value
+        body = {"displayName": f"zz_tmp_env_{uuid.uuid4().hex[:6]}",
+                  "description": "temporary: looking for the field",
                   "versionConfigs": vcs}
-        if donde == "raiz":
-            cuerpo[campo] = valor
+        if where == "root":
+            body[field] = value
         try:
-            op = esperar(cons, cons.request(
-                "POST", cons._url(f"{base}/environments"), body=cuerpo))
-            resp = op.get("response") or {}
-            if resp.get("name"):
-                print(f"  {donde}.{campo:<22} -> CREATED (valid field?)")
-                cons.request("DELETE", cons._url("/" + resp["name"]))
+            op = wait_for(cons, cons.request(
+                "POST", cons._url(f"{base}/environments"), body=body))
+            response = op.get("response") or {}
+            if response.get("name"):
+                print(f"  {where}.{field:<22} -> CREATED (valid field?)")
+                cons.request("DELETE", cons._url("/" + response["name"]))
                 print("      deleted")
                 continue
             err = json.dumps(op.get("error"), ensure_ascii=False)
         except Exception as exc:
             err = str(exc)
         if "NO_EXISTE_0000" in err:
-            marca = "  <== THE FIELD IS READ (the server names the garbage)"
+            mark = "  <== THE FIELD IS READ (the server names the garbage)"
         elif "not included in the environment" in err:
-            marca = "  (field ignored: the usual error)"
+            mark = "  (field ignored: the usual error)"
         else:
-            marca = "  <== DIFFERENT ERROR"
-        print(f"  {donde}.{campo:<22} -> {err[:150]}{marca}")
+            mark = "  <== DIFFERENT ERROR"
+        print(f"  {where}.{field:<22} -> {err[:150]}{mark}")
 
     return 0
 

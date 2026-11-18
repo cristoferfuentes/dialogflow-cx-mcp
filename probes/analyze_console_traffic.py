@@ -10,7 +10,7 @@ It gives two things:
    those the backend keeps and the public API drops are **field gaps**
    (the ones that can be written).
 
-    .venv/bin/python probes/analiza_trafico_consola.py --trafico /tmp/trafico_consola.json
+    .venv/bin/python probes/analyze_console_traffic.py --traffic /tmp/console_traffic.json
 """
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(RAIZ))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 from cxp.gaps import SchemaIndex, find_gaps  # noqa: E402
 
@@ -30,25 +30,25 @@ UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 ID_LIKE = re.compile(r"^(bg-[a-z-]+-|projects-|projects$)")
 
 
-def _es_id(seg: str) -> bool:
+def _is_id(seg: str) -> bool:
     return bool(UUID.match(seg)) or seg in ("-", "null", "me") or seg.startswith("bg-cx-")
 
 
-def _sin_version(ruta: str) -> str:
+def _strip_version(route: str) -> str:
     """Strips the version and the leading slash: '/v3alpha1/projects/x' -> 'projects/x'."""
-    r = ruta.split("?", 1)[0]
+    r = route.split("?", 1)[0]
     r = re.sub(r"^/v[0-9a-z]+", "", r)
     return r.strip("/")
 
 
-def canon_ruta(ruta: str) -> str:
+def canon_route(route: str) -> str:
     """Concrete route -> canonical form used for grouping (the ids are anonymized)."""
-    r = _sin_version(ruta)
-    partes = [p for p in r.split("/") if p != ""]
-    return "/" + "/".join("{x}" if _es_id(p) else p for p in partes)
+    r = _strip_version(route)
+    parts = [p for p in r.split("/") if p != ""]
+    return "/" + "/".join("{x}" if _is_id(p) else p for p in parts)
 
 
-def doc_a_regex(tpl: str, params: dict | None = None):
+def doc_to_regex(tpl: str, params: dict | None = None):
     """Discovery doc template -> regex comparable with a concrete route.
 
     The discovery doc does not give the full route: it gives `v3beta1/{+name}` and the
@@ -65,16 +65,16 @@ def doc_a_regex(tpl: str, params: dict | None = None):
 
     custom = ""
     if ":" in t:
-        base, sufijo = t.rsplit(":", 1)
-        custom = ":" + sufijo
+        base, suffix = t.rsplit(":", 1)
+        custom = ":" + suffix
         t = base
 
     def rep(m):
         var = m.group(1)
         p = params.get(var) or {}
-        patron = p.get("pattern")
-        if patron:
-            return patron.strip("^$")
+        pattern = p.get("pattern")
+        if pattern:
+            return pattern.strip("^$")
         return "[^/]+"
 
     t = re.sub(r"\{\+?([A-Za-z0-9_]+)\}", rep, t)
@@ -82,7 +82,7 @@ def doc_a_regex(tpl: str, params: dict | None = None):
     return re.compile("^" + t + "$"), custom
 
 
-def coincide(ruta: str, info: dict) -> bool:
+def matches(route: str, info: dict) -> bool:
     """Does the concrete route correspond to that method of the discovery doc?
 
     Rules:
@@ -90,47 +90,47 @@ def coincide(ruta: str, info: dict) -> bool:
         with a suffix has exactly one);
       * if the method has a suffix, the route has to end with it.
     """
-    if ruta.count(":") != info["puntos"]:
+    if route.count(":") != info["custom_colons"]:
         return False
     custom = info["custom"]
     if custom:
-        if not ruta.endswith(custom):
+        if not route.endswith(custom):
             return False
-        return bool(info["regex"].fullmatch(ruta[: -len(custom)]))
-    return bool(info["regex"].fullmatch(ruta))
+        return bool(info["regex"].fullmatch(route[: -len(custom)]))
+    return bool(info["regex"].fullmatch(route))
 
 
 def canon_doc(tpl: str) -> str:
-    """Discovery doc template -> the same shape as `canon_ruta`."""
+    """Discovery doc template -> the same shape as `canon_route`."""
     t = re.sub(r"^v[0-9a-z]+/", "", tpl)
     # {var=projects/*/locations/*/agents/*} -> projects/*/locations/*/agents/*
     t = re.sub(r"\{[A-Za-z0-9_]+=([^}]*)\}", r"\1", t)
     t = t.replace("{+", "").replace("}", "")
-    partes = [p for p in t.split("/") if p != ""]
+    parts = [p for p in t.split("/") if p != ""]
     out = []
-    for p in partes:
+    for p in parts:
         out.append("{x}" if p == "*" else p)
     return "/" + "/".join(out)
 
 
-def index_metodos(version: str) -> dict[tuple[str, str], dict]:
+def index_methods(version: str) -> dict[tuple[str, str], dict]:
     """(verb, canonical route) -> {name, request, response, path}."""
-    docs = json.loads((RAIZ / ".discovery" / f"{version}.json").read_text())
+    docs = json.loads((ROOT / ".discovery" / f"{version}.json").read_text())
     out: dict[tuple[str, str], dict] = {}
 
     def walk(node, path=""):
         for name, res in (node or {}).items():
             for m, mdef in (res.get("methods") or {}).items():
                 tpl = mdef.get("path", "")
-                rx, custom = doc_a_regex(tpl, mdef.get("parameters") or {})
+                rx, custom = doc_to_regex(tpl, mdef.get("parameters") or {})
                 # The key is the regex: two methods can share a template
                 # (`{+name}`) and still be different routes.
                 key = (mdef.get("httpMethod", ""), rx.pattern, custom)
                 out.setdefault(key, {
                     "regex": rx,
                     "custom": custom,
-                    "puntos": tpl.count(":"),
-                    "nombre": f"{path}.{name}.{m}" if path else f"{name}.{m}",
+                    "custom_colons": tpl.count(":"),
+                    "name": f"{path}.{name}.{m}" if path else f"{name}.{m}",
                     "request": (mdef.get("request") or {}).get("$ref", "").split("/")[-1],
                     "response": (mdef.get("response") or {}).get("$ref", "").split("/")[-1],
                     "path": tpl,
@@ -141,114 +141,115 @@ def index_metodos(version: str) -> dict[tuple[str, str], dict]:
     return out
 
 
-def _metodo_de(idx: dict, verb: str, ruta: str) -> dict | None:
+def _method_for(idx: dict, verb: str, route: str) -> dict | None:
     """The method of the discovery doc that corresponds to a REAL concrete route."""
-    real = _sin_version(ruta)
+    real = _strip_version(route)
     for (mverb, _mcanon, _custom), info in idx.items():
-        if mverb == verb and coincide(real, info):
+        if mverb == verb and matches(real, info):
             return info
     return None
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--trafico", default="/tmp/trafico_consola.json")
+    ap.add_argument("--traffic", default="/tmp/console_traffic.json")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
 
-    cap = json.loads(Path(args.trafico).read_text())
-    versiones = ("v3beta1", "v3alpha1", "v3")
-    idxs = {v: index_metodos(v) for v in versiones}
+    cap = json.loads(Path(args.traffic).read_text())
+    versions = ("v3beta1", "v3alpha1", "v3")
+    idxs = {v: index_methods(v) for v in versions}
 
     # ---------------------------------------------------- 1) METHOD gaps
-    llamadas: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    calls: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for req in cap:
-        if req["metodo"] == "OPTIONS":
+        if req["method"] == "OPTIONS":
             continue
-        llamadas[(req["metodo"], canon_ruta(req["ruta"]))].append(req)
+        calls[(req["method"], canon_route(req["route"]))].append(req)
 
-    metodos = []
-    for (verb, ruta), reqs in sorted(llamadas.items()):
-        donde = []
-        for v in versiones:
+    methods = []
+    for (verb, route), reqs in sorted(calls.items()):
+        where = []
+        for v in versions:
             for (mverb, _mcanon, _custom), info in idxs[v].items():
                 if mverb != verb:
                     continue
-                if coincide(_sin_version(ruta), info):
-                    donde.append(v)
+                if matches(_strip_version(route), info):
+                    where.append(v)
                     break
-        metodos.append({
-            "verbo": verb, "ruta": ruta, "n": len(reqs),
-            "en": donde,
-            "solo_alpha1": donde == ["v3alpha1"],
-            "fuera_de_v3beta1": "v3beta1" not in donde,
-            "fuera_de_todas": not donde,
+        methods.append({
+            "verb": verb, "route": route, "n": len(reqs),
+            "in": where,
+            "only_alpha1": where == ["v3alpha1"],
+            "outside_v3beta1": "v3beta1" not in where,
+            "outside_all": not where,
         })
 
     # ------------------------------------------- 2) FIELD gaps (request bodies)
-    idx_b = SchemaIndex.load(RAIZ / ".discovery" / "v3beta1.json", version="v3beta1")
-    idx_a = SchemaIndex.load(RAIZ / ".discovery" / "v3alpha1.json", version="v3alpha1")
-    huecos_campo: dict[str, dict] = {}
+    idx_b = SchemaIndex.load(ROOT / ".discovery" / "v3beta1.json", version="v3beta1")
+    idx_a = SchemaIndex.load(ROOT / ".discovery" / "v3alpha1.json", version="v3alpha1")
+    field_gaps: dict[str, dict] = {}
 
-    for (verb, ruta), reqs in llamadas.items():
+    for (verb, route), reqs in calls.items():
         # equivalent method (same verb and REAL route) in v3beta1 / v3alpha1
-        real = reqs[0].get("ruta") or ""
-        ref = _metodo_de(idxs["v3beta1"], verb, real)
-        ref_a = _metodo_de(idxs["v3alpha1"], verb, real)
-        if not ref and not ref_a:
+        real = reqs[0].get("route") or ""
+        ref = _method_for(idxs["v3beta1"], verb, real)
+        ref_alpha = _method_for(idxs["v3alpha1"], verb, real)
+        if not ref and not ref_alpha:
             continue
-        esquema = (ref or ref_a or {}).get("request") or ""
-        if not esquema:
+        schema = (ref or ref_alpha or {}).get("request") or ""
+        if not schema:
             continue
-        full = (idx_b.props.get(esquema) and esquema) or (idx_a.props.get(esquema) and esquema)
+        full = (idx_b.props_of(schema) and schema) or (idx_a.props_of(schema) and schema)
         if not full:
             continue
-        idx = idx_b if esquema in idx_b.props else idx_a
+        idx = idx_b if idx_b.props_of(schema) else idx_a
         for req in reqs:
-            cuerpo = req.get("cuerpo")
-            if not cuerpo:
+            body = req.get("body")
+            if not body:
                 continue
             try:
-                obj = json.loads(cuerpo)
+                obj = json.loads(body)
             except ValueError:
                 continue
-            for g in find_gaps(obj, esquema, idx):
-                clave = f"{g.schema}.{g.campo}"
-                if clave not in huecos_campo:
-                    huecos_campo[clave] = {
-                        "esquema": g.schema, "campo": g.campo,
-                        "verbo": verb, "ruta": ruta, "metodo": ref["nombre"] if ref else ref_a["nombre"],
-                        "ejemplo": g.ruta, "valor": g.valor, "veces": 0,
+            for g in find_gaps(obj, schema, idx):
+                key = f"{g.schema}.{g.field}"
+                if key not in field_gaps:
+                    field_gaps[key] = {
+                        "schema": g.schema, "field": g.field,
+                        "verb": verb, "route": route,
+                        "method": ref["name"] if ref else ref_alpha["name"],
+                        "example": g.route, "value": g.value, "count": 0,
                     }
-                huecos_campo[clave]["veces"] += 1
+                field_gaps[key]["count"] += 1
 
     print("=" * 78)
     print("1) ENDPOINTS THE CONSOLE CALLS (captured live)")
     print("=" * 78)
-    for m in metodos:
-        donde = ",".join(m["en"]) or "NO VERSION"
-        marca = ""
-        if m["fuera_de_todas"]:
-            marca = "   <== does not exist in ANY discovery doc"
-        elif m["fuera_de_v3beta1"]:
-            marca = "   <== only in " + donde
-        print(f"  {m['verbo']:<6} {m['ruta']:<62} x{m['n']:<4} [{donde}]{marca}")
+    for m in methods:
+        where = ",".join(m["in"]) or "NO VERSION"
+        mark = ""
+        if m["outside_all"]:
+            mark = "   <== does not exist in ANY discovery doc"
+        elif m["outside_v3beta1"]:
+            mark = "   <== only in " + where
+        print(f"  {m['verb']:<6} {m['route']:<62} x{m['n']:<4} [{where}]{mark}")
 
     print()
     print("=" * 78)
     print("2) FIELDS THE CONSOLE SENDS AND THE PUBLIC PROTO DOES NOT DECLARE")
     print("=" * 78)
-    if not huecos_campo:
+    if not field_gaps:
         print("  (none in the captured bodies)")
-    for clave, h in sorted(huecos_campo.items(), key=lambda kv: -kv[1]["veces"]):  # noqa: B007
-        print(f"  {h['esquema']}.{h['campo']:<34} x{h['veces']:<4} "
-              f"{h['verbo']} {h['ruta'][:44]}")
-        print(f"      method: {h['metodo']}  example: {h['ejemplo']}")
-        print(f"      value the console sends: {json.dumps(h['valor'], ensure_ascii=False)[:160]}")
+    for key, h in sorted(field_gaps.items(), key=lambda kv: -kv[1]["count"]):  # noqa: B007
+        print(f"  {h['schema']}.{h['field']:<34} x{h['count']:<4} "
+              f"{h['verb']} {h['route'][:44]}")
+        print(f"      method: {h['method']}  example: {h['example']}")
+        print(f"      value the console sends: {json.dumps(h['value'], ensure_ascii=False)[:160]}")
 
     if args.json:
         Path(args.json).write_text(json.dumps(
-            {"metodos": metodos, "campos": list(huecos_campo.values())},
+            {"methods": methods, "fields": list(field_gaps.values())},
             ensure_ascii=False, indent=1))
         print(f"\n-> {args.json}")
     return 0

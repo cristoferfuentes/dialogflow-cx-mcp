@@ -19,7 +19,7 @@ measurements are:
 | `probes/probe_schema_gaps.py` | which fields the backend returns that the public schema does not declare |
 | `probes/probe_console_only_writable.py` | which out-of-schema fields the server **keeps** when written |
 | `probes/probe_console_only_writable3.py` | the final matrix (uses production code: `cxp.console_fields.set_field`) |
-| `probes/test_herramientas_nuevas.py` | the new tools, end to end |
+| `probes/test_new_tools.py` | the new tools, end to end |
 
 Agent ids are **never hardcoded**: they come from the environment.
 
@@ -65,8 +65,8 @@ run it and commit the regenerated badges.
 1. Measure it (with a probe) and note the **exact symptom** the server returns.
 2. Add it to `cxp/limits.py` (limit) or to `cxp/gaps.py` (gap), with its cause and its
    workaround.
-3. If it is a gap, state **whether it can be written** (state `escribible` /
-   `derivado` / `solo_lectura`): that is the information with the most value.
+3. If it is a gap, state **whether it can be written** (state `writable` /
+   `derived` / `read_only`): that is the information with the most value.
 
 ## Security
 

@@ -19,14 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agente, targets_de_sonda
+from _entorno import agent, probe_targets
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST
 from cxp.httpclient import Session
 
-ORIG = agente("por_defecto")
-_TARGET = next(iter(targets_de_sonda().values()), {"flow": "", "page": ""})
+ORIG = agent("default")
+_TARGET = next(iter(probe_targets().values()), {"flow": "", "page": ""})
 OF = _TARGET["flow"]
 OP = _TARGET["page"]
 

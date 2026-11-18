@@ -8,8 +8,8 @@ writes with **first-party authentication** (Google cookies), which is a
 Safety rules (this NEVER class guesses):
 
 * It only writes to the indicated agent; the original is rejected before opening the UI.
-* **Verifies before and after**: the route target must change from "sin
-  destino" to the playbook's displayName. If the state cannot be read, it aborts.
+* **Verifies before and after**: the route target must change from "no
+  destination" to the playbook's displayName. If the state cannot be read, it aborts.
 * On any ambiguity (several matching elements, button not found)
   **aborts and dumps the DOM** for diagnosis: it never clicks blindly."""
 from __future__ import annotations
@@ -40,7 +40,7 @@ class ConsoleRouteEditor:
         try:
             return (self.page.content() or "")[:limit]
         except Exception:
-            return "<no se pudo volcar el DOM>"
+            return "<the DOM could not be dumped>"
 
     def _texts(self, selector: str) -> list[str]:
         try:
@@ -68,7 +68,7 @@ class ConsoleRouteEditor:
                 continue
         # fallback: the new console can show the routes in the right panel
         raise ConsoleUiError(
-            "no se encontro la pestana de rutas. DOM:\n" + self._dump()
+            "the routes tab was not found. DOM:\n" + self._dump()
         )
 
     # ------------------------------------------------------------- the routes
@@ -90,13 +90,13 @@ class ConsoleRouteEditor:
             except Exception:
                 pass
             raise ConsoleUiError(
-                f"no se encontro la ruta por su condicion ({n} coincidencias exactas). "
-                "Condiciones visibles:\n"
+                f"the route was not found by its condition ({n} exact matches). "
+                "Visible conditions:\n"
                 + "\n".join("- " + t for t in self._texts("mat-expansion-panel-header, tr, [role='row']")[:40])
                 + "\nDOM:\n" + self._dump()
             )
         raise ConsoleUiError(
-            f"la condicion coincide con {n} elementos: no se hace clic a ciegas. "
+            f"the condition matches {n} elements: it does not click blindly. "
             "DOM:\n" + self._dump()
         )
 
@@ -128,8 +128,8 @@ class ConsoleRouteEditor:
         before = self.destination_text(row)
         if playbook_display_name.lower() in before.lower():
             return {
-                "estado": "ya_tenia_el_destino",
-                "destino_antes": before,
+                "status": "already_had_the_destination",
+                "destination_before": before,
                 "url": url,
             }
 
@@ -151,7 +151,7 @@ class ConsoleRouteEditor:
             except Exception:
                 continue
         if target_select is None:
-            raise ConsoleUiError("no se encontro el desplegable de destino. DOM:\n" + self._dump())
+            raise ConsoleUiError("the destination dropdown was not found. DOM:\n" + self._dump())
 
         target_select.click()
         self.page.wait_for_timeout(900)
@@ -161,7 +161,7 @@ class ConsoleRouteEditor:
         try:
             if opt.count() == 0:
                 raise ConsoleUiError(
-                    "el desplegable no ofrece 'Playbook'. Opciones: "
+                    "the dropdown does not offer 'Playbook'. Options: "
                     + ", ".join(self._texts("mat-option"))
                 )
             opt.click()
@@ -169,7 +169,7 @@ class ConsoleRouteEditor:
             raise
         except Exception as exc:
             raise ConsoleUiError(
-                f"fallo al elegir 'Playbook': {exc}\nDOM:\n" + self._dump()) from exc
+                f"choosing 'Playbook' failed: {exc}\nDOM:\n" + self._dump()) from exc
         self.page.wait_for_timeout(1500)
 
         # 4) choose the specific playbook in the resource selector
@@ -185,7 +185,7 @@ class ConsoleRouteEditor:
         ).first
         if item.count() == 0:
             raise ConsoleUiError(
-                f"el playbook {playbook_display_name!r} no aparece en el selector. "
+                f"the playbook {playbook_display_name!r} does not appear in the selector. "
                 "DOM:\n" + self._dump()
             )
         item.click()
@@ -203,7 +203,7 @@ class ConsoleRouteEditor:
             except Exception:
                 continue
         if not saved:
-            raise ConsoleUiError("no se encontro el boton de guardar. DOM:\n" + self._dump())
+            raise ConsoleUiError("the save button was not found. DOM:\n" + self._dump())
 
         # 6) WAIT and VERIFY: the console shows the target in the row
         self.page.wait_for_timeout(6000)
@@ -214,14 +214,15 @@ class ConsoleRouteEditor:
         after = self.destination_text(self.route_row(condition))
         ok = playbook_display_name.lower() in after.lower()
         return {
-            "estado": "puesto" if ok else "NO_VERIFICADO",
-            "destino_antes": before,
-            "destino_despues": after,
-            "verificado": ok,
+            "status": "set" if ok else "NOT_VERIFIED",
+            "destination_before": before,
+            "destination_after": after,
+            "verified": ok,
             "url": url,
-            "aviso": (
+            "warning": (
                 ""
                 if ok
-                else "la UI no muestra el destino esperado: NO se puede confirmar el cambio"
+                else "the UI does not show the expected destination: the change "
+                "CANNOT be confirmed"
             ),
         }

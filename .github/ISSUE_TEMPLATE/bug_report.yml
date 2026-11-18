@@ -65,5 +65,5 @@ body:
     attributes:
       label: Checks
       options:
-        - label: I ran `cx_status` first and `credenciales_ok` and `sesion_aceptada` are `true`.
+        - label: I ran `cx_status` first and `credentials_ok` and `session_accepted` are `true`.
         - label: I removed credentials, project ids and agent ids from this report.

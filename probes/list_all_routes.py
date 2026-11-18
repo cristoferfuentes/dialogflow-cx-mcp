@@ -14,12 +14,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 FRAME_URL = (
     "https://conversational-agents.cloud.google.com/cx/projects/{p}/locations/{l}/agents/{a}"
     "/flows/{f}?pageId={pg}&embedded=true"
@@ -33,11 +33,11 @@ JS_CONDS = """
 JS_SCROLL = """
 (top) => {
   const list = document.querySelector('.transition-route-list');
-  let el = list, sc = null;
-  while (el) {
-    const st = getComputedStyle(el);
-    if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) { sc = el; break; }
-    el = el.parentElement;
+  let node = list, sc = null;
+  while (node) {
+    const st = getComputedStyle(node);
+    if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 4) { sc = node; break; }
+    node = node.parentElement;
   }
   if (!sc) return {ok:false, reason:'no scrollable container'};
   sc.scrollTop = top;
@@ -72,23 +72,23 @@ def main() -> int:
     except Exception:
         pass
 
-    vistas: list[str] = []
+    views: list[str] = []
     for top in (0, 150, 300, 450, 600, 900, 1400):
         info = page.evaluate(JS_SCROLL, top)
         page.wait_for_timeout(900)
-        conds = page.evaluate(JS_CONDS)
-        nuevos = [c for c in conds if c not in vistas]
-        vistas.extend(nuevos)
-        print(f"== scrollTop={top} {info}  -> {len(conds)} visible, {len(vistas)} accumulated", flush=True)
-        if not nuevos and top > 0:
+        conditions = page.evaluate(JS_CONDS)
+        new = [c for c in conditions if c not in views]
+        views.extend(new)
+        print(f"== scrollTop={top} {info}  -> {len(conditions)} visible, {len(views)} accumulated", flush=True)
+        if not new and top > 0:
             break
 
-    print(f"\n== {len(vistas)} routes:")
-    for i, c in enumerate(vistas):
+    print(f"\n== {len(views)} routes:")
+    for i, c in enumerate(views):
         print(f"   [{i}] {c}", flush=True)
 
     if args.out:
-        Path(args.out).write_text(json.dumps(vistas, indent=1, ensure_ascii=False), encoding="utf-8")
+        Path(args.out).write_text(json.dumps(views, indent=1, ensure_ascii=False), encoding="utf-8")
         print(f"== written {args.out}", flush=True)
     return 0
 

@@ -35,7 +35,7 @@ from cxp.guard import assert_writable
 from cxp.httpclient import HttpStatusError
 
 
-def _estado(api: ConsoleApi, base: str, pid: str) -> dict:
+def _state(api: ConsoleApi, base: str, pid: str) -> dict:
     """GET of the playbook: text + registered references."""
     pb = api.request("GET", api._url(f"{base}/playbooks/{pid}"))
     instr = pb.get("instruction") or {}
@@ -55,8 +55,8 @@ def main() -> int:
     assert_writable(cfg.project, agent, cfg)
     api = ConsoleApi(cfg)
     base = f"{api._base('')}/agents/{agent}"
-    creados: list[str] = []
-    resultados: dict[str, str] = {}
+    created: list[str] = []
+    results: dict[str, str] = {}
     try:
         # ------------------------------------------------------------------
         # V1: clean POST (no macros) -> base for the PATCHes
@@ -64,17 +64,17 @@ def main() -> int:
         name = "zz_tmp_selfref_mask"
         body = {
             "displayName": name,
-            "goal": "Playbook de prueba para medir donde puede vivir la autorreferencia.",
+            "goal": "Test playbook to measure where the self-reference can live.",
             "instruction": {
                 "guidelines": "",
-                "steps": [{"text": "Paso limpio sin macros."}],
+                "steps": [{"text": "Clean step without macros."}],
             },
         }
         print("=== V1: clean POST (no macros) ===")
         pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                          body=body, timeout=120.0)
         pid = pb["name"].split("/")[-1]
-        creados.append(pid)
+        created.append(pid)
         print(f"   CREATED: {pid}  ({pb.get('displayName')})")
         print(f"   referencedPlaybooks: {pb.get('referencedPlaybooks')}")
 
@@ -88,15 +88,15 @@ def main() -> int:
             api.request("PATCH", api._url(f"{base}/playbooks/{pid}", alt="json"),
                         body={"instruction": {"steps": steps}},
                         query={"updateMask": "instruction.steps"}, timeout=120.0)
-            est = _estado(api, base, pid)
+            est = _state(api, base, pid)
             print("   PATCH ACCEPTED")
             print(f"   steps:          {est['steps'][:160]}")
             print(f"   guidelines:     {est['guidelines']!r}")
             print(f"   refPlaybooks:   {est['referencedPlaybooks']}")
-            resultados["instruction.steps"] = "ACCEPTED (macro in steps, no edge)"
+            results["instruction.steps"] = "ACCEPTED (macro in steps, no edge)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
-            resultados["instruction.steps"] = f"HTTP {e.status}"
+            results["instruction.steps"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
         # V3: PATCH updateMask=instruction.guidelines -> macro in guidelines
@@ -106,15 +106,15 @@ def main() -> int:
             api.request("PATCH", api._url(f"{base}/playbooks/{pid}", alt="json"),
                         body={"instruction": {"guidelines": f"Delega en ${{PLAYBOOK:{name}}}"}},
                         query={"updateMask": "instruction.guidelines"}, timeout=120.0)
-            est = _estado(api, base, pid)
+            est = _state(api, base, pid)
             print("   PATCH ACCEPTED")
             print(f"   guidelines:     {est['guidelines']!r}")
             print(f"   steps:          {est['steps'][:120]}")
             print(f"   refPlaybooks:   {est['referencedPlaybooks']}")
-            resultados["instruction.guidelines"] = "ACCEPTED"
+            results["instruction.guidelines"] = "ACCEPTED"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
-            resultados["instruction.guidelines"] = f"HTTP {e.status}"
+            results["instruction.guidelines"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
         # V4: PATCH updateMask=instruction (TOP-LEVEL field)
@@ -127,10 +127,10 @@ def main() -> int:
                                               "steps": [{"text": f"Delega en ${{PLAYBOOK:{name}}}"}]}},
                         query={"updateMask": "instruction"}, timeout=120.0)
             print("   PATCH ACCEPTED (unexpected)")
-            resultados["instruction"] = "ACCEPTED (unexpected)"
+            results["instruction"] = "ACCEPTED (unexpected)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
-            resultados["instruction"] = f"HTTP {e.status}"
+            results["instruction"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
         # V5: POST with the macro in `goal` (the goal is ALSO scanned)
@@ -139,19 +139,19 @@ def main() -> int:
         name5 = "zz_tmp_selfref_goal"
         body5 = {
             "displayName": name5,
-            "goal": f"No te invoques a ti mismo: ${{PLAYBOOK:{name5}}}",
+            "goal": f"Do not invoke yourself: ${{PLAYBOOK:{name5}}}",
             "instruction": {"guidelines": "", "steps": [{"text": "Paso limpio."}]},
         }
         try:
             pb5 = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                               body=body5, timeout=120.0)
             pid5 = pb5["name"].split("/")[-1]
-            creados.append(pid5)
+            created.append(pid5)
             print(f"   CREATED (unexpected): {pid5}")
-            resultados["goal"] = "ACCEPTED (unexpected)"
+            results["goal"] = "ACCEPTED (unexpected)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
-            resultados["goal"] = f"HTTP {e.status}"
+            results["goal"] = f"HTTP {e.status}"
 
         # ------------------------------------------------------------------
         # V6: POST with the macro in `guidelines` (the known escape hatch)
@@ -161,42 +161,42 @@ def main() -> int:
         name6 = "zz_tmp_selfref_guide"
         body6 = {
             "displayName": name6,
-            "goal": "Playbook de prueba (macro en guidelines).",
+            "goal": "Test playbook (macro in the guidelines).",
             "instruction": {
                 "guidelines": f"Delega en ${{PLAYBOOK:{name6}}}",
-                "steps": [{"text": "Paso limpio sin macros."}],
+                "steps": [{"text": "Clean step without macros."}],
             },
         }
         try:
             pb6 = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                               body=body6, timeout=120.0)
             pid6 = pb6["name"].split("/")[-1]
-            creados.append(pid6)
-            est = _estado(api, base, pid6)
+            created.append(pid6)
+            est = _state(api, base, pid6)
             print(f"   CREATED: {pid6}")
             print(f"   guidelines:   {est['guidelines']!r}")
             print(f"   refPlaybooks: {est['referencedPlaybooks']}  <-- edge registered?")
-            resultados["POST guidelines"] = "ACCEPTED (no edge)"
+            results["POST guidelines"] = "ACCEPTED (no edge)"
         except HttpStatusError as e:
             print(f"   HTTP {e.status}: {e.body[:300]}")
-            resultados["POST guidelines"] = f"HTTP {e.status}"
+            results["POST guidelines"] = f"HTTP {e.status}"
 
         print("\n=== SUMMARY ===")
-        for k, v in resultados.items():
+        for k, v in results.items():
             print(f"   {k:28s} -> {v}")
 
     finally:
         print("\n=== cleanup ===")
-        for pid in creados:
+        for pid in created:
             try:
                 api.request("DELETE", api._url(f"{base}/playbooks/{pid}", alt="json",
                                               force="true"))
                 print(f"   playbook {pid} deleted")
             except HttpStatusError as e:
                 print(f"   !! could not delete {pid}: HTTP {e.status} {e.body[:160]}")
-        vivos = [p for p in api.list_playbooks(agent)
+        alive = [p for p in api.list_playbooks(agent)
                  if (p.get("displayName") or "").startswith("zz_tmp_")]
-        print("   zz_tmp_ playbooks left:", len(vivos))
+        print("   zz_tmp_ playbooks left:", len(alive))
     return 0
 
 

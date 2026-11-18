@@ -130,8 +130,8 @@ class Mirror:
         idx = self.index(version)
         if method_id not in idx:
             raise MirrorError(
-                f"metodo desconocido: {method_id!r}. "
-                f"Usa cx_discover para ver el mapa."
+                f"unknown method: {method_id!r}. "
+                f"Use cx_discover to see the map."
             )
         spec = dict(idx[method_id])
         spec["id"] = method_id
@@ -145,13 +145,13 @@ class Mirror:
             "id": method_id,
             "http": spec.get("httpMethod"),
             "path": spec.get("path"),
-            "parametros": {
-                k: {"en": v.get("location"), "obligatorio": bool(v.get("required")),
-                    "tipo": v.get("type")}
+            "parameters": {
+                k: {"in": v.get("location"), "required": bool(v.get("required")),
+                    "type": v.get("type")}
                 for k, v in params.items()
             },
-            "cuerpo": spec.get("request"),
-            "respuesta": spec.get("response"),
+            "body": spec.get("request"),
+            "response": spec.get("response"),
         }
 
     # URL
@@ -186,8 +186,8 @@ class Mirror:
         path = _PLACEHOLDER.sub(_sub, template)
         if missing:
             raise MirrorError(
-                f"faltan parametros para {method_id}: {sorted(set(missing))} "
-                f"(plantilla: {template})"
+                f"missing parameters for {method_id}: {sorted(set(missing))} "
+                f"(template: {template})"
             )
         # The template starts with the version ("v3beta1/{+name}").
         path = re.sub(r"^v[0-9a-z]+/", "", path)
@@ -204,8 +204,8 @@ class Mirror:
         # MEASURED (2026-11-15): the host depends on the LOCATION of the path: for
         # `global` it is the global host and for the rest, the regional host
         # (`{location}-dialogflow.clients6.google.com`).
-        from .console_api import host_de_path
-        return (f"https://{host_de_path(path)}/{version}{path}?{urlencode(q)}",
+        from .console_api import host_from_path
+        return (f"https://{host_from_path(path)}/{version}{path}?{urlencode(q)}",
                 http)
 
     # ------------------------------------------------------------- shortcuts

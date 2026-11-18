@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 
-RESULTADOS: list[tuple[str, bool, str]] = []
+RESULTS: list[tuple[str, bool, str]] = []
 
 
 def main() -> int:
@@ -39,50 +39,50 @@ def main() -> int:
     def post(path, body):
         return api.request("POST", api._url(path), body)
 
-    def borrar(path):
+    def delete(path):
         return api.request("DELETE", api._url(path))
 
-    def leer_en(ruta, obj):
+    def read_at(path, obj):
         cur = obj
-        for parte in ruta.split("."):
+        for part in path.split("."):
             if isinstance(cur, list):
                 cur = cur[0] if cur else None
             if not isinstance(cur, dict):
                 return None
-            cur = cur.get(parte)
+            cur = cur.get(part)
         return cur
 
-    def probar(etiqueta, nombre, mutador, mascara, ruta, valor, revertir=True):
+    def test_field(label, name, mutator, mask, path, value, revert=True):
         try:
-            before = get(nombre)
-            copia = copy.deepcopy(before)
-            mutador(copia, valor)
-            respuesta = patch(nombre, copia, mascara)
-            after = get(nombre)
-            leido = leer_en(ruta, after)
-            ok = leido == valor
-            RESULTADOS.append((etiqueta, ok, json.dumps(leido, ensure_ascii=False)[:120]))
-            print(f"  [{'OK ' if ok else 'NO '}] {etiqueta}  -> read={json.dumps(leido, ensure_ascii=False)[:100]}")
+            before = get(name)
+            draft = copy.deepcopy(before)
+            mutator(draft, value)
+            response = patch(name, draft, mask)
+            after = get(name)
+            read = read_at(path, after)
+            ok = read == value
+            RESULTS.append((label, ok, json.dumps(read, ensure_ascii=False)[:120]))
+            print(f"  [{'OK ' if ok else 'NO '}] {label}  -> read={json.dumps(read, ensure_ascii=False)[:100]}")
             if not ok:
-                print("        response:", json.dumps(respuesta, ensure_ascii=False)[:220])
-            if revertir:
-                patch(nombre, before, mascara)
+                print("        response:", json.dumps(response, ensure_ascii=False)[:220])
+            if revert:
+                patch(name, before, mask)
         except Exception as exc:
-            RESULTADOS.append((etiqueta, False, f"{type(exc).__name__}: {exc}"))
-            print(f"  [ERR] {etiqueta}: {str(exc)[:220]}")
+            RESULTS.append((label, False, f"{type(exc).__name__}: {exc}"))
+            print(f"  [ERR] {label}: {str(exc)[:220]}")
 
     # ---------------------------------------------------------------- temporary
     flow = post(f"{api._base(project)}/agents/{agent}/flows",
-                {"displayName": "zz_tmp_gap_probe", "description": "temporal"})
+                {"displayName": "zz_tmp_gap_probe", "description": "temporary"})
     flow_name = flow.get("name", "")
     flow_id = flow_name.rsplit("/", 1)[-1]
     if not flow_id:
         print("the temporary flow could not be created:", flow)
         return 1
-    atexit.register(lambda: borrar(f"{api._base(project)}/agents/{agent}/flows/{flow_id}"))
+    atexit.register(lambda: delete(f"{api._base(project)}/agents/{agent}/flows/{flow_id}"))
 
     page = post(f"{api._base(project)}/agents/{agent}/flows/{flow_id}/pages",
-                {"displayName": "Pagina probe",
+                {"displayName": "Probe page",
                  "entryFulfillment": {"messages": [{"text": {"text": ["hola"]}}]}})
     page_name = page.get("name", "")
     print("flow:", flow_id, "| page:", page_name.rsplit("/", 1)[-1])
@@ -106,33 +106,33 @@ def main() -> int:
     def set_adv(d, v):
         d.setdefault("advancedSettings", {})["enabled"] = v
 
-    probar("Page.advancedSettings.enabled", page_name, set_adv, "advancedSettings",
+    test_field("Page.advancedSettings.enabled", page_name, set_adv, "advancedSettings",
            "advancedSettings.enabled", False)
 
     def set_playback(d, v):
         d.setdefault("advancedSettings", {})["playbackInterruptionSettings"] = v
 
-    probar("Page.advancedSettings.playbackInterruptionSettings", page_name, set_playback,
+    test_field("Page.advancedSettings.playbackInterruptionSettings", page_name, set_playback,
            "advancedSettings", "advancedSettings.playbackInterruptionSettings",
            {"allowPlaybackInterruption": False})
 
     def set_speechadapt(d, v):
         d.setdefault("advancedSettings", {})["speechAdaptationSettings"] = v
 
-    probar("Page.advancedSettings.speechAdaptationSettings", page_name, set_speechadapt,
+    test_field("Page.advancedSettings.speechAdaptationSettings", page_name, set_speechadapt,
            "advancedSettings", "advancedSettings.speechAdaptationSettings", {})
 
     def set_smartendpoint(d, v):
         d.setdefault("advancedSettings", {}).setdefault("speechSettings", {})["enableSmartEndpointing"] = v
 
-    probar("Page.advancedSettings.speechSettings.enableSmartEndpointing", page_name,
+    test_field("Page.advancedSettings.speechSettings.enableSmartEndpointing", page_name,
            set_smartendpoint, "advancedSettings",
            "advancedSettings.speechSettings.enableSmartEndpointing", False)
 
     def set_speaker(d, v):
         d["speakerIdSettings"] = v
 
-    probar("Page.speakerIdSettings", page_name, set_speaker, "speakerIdSettings",
+    test_field("Page.speakerIdSettings", page_name, set_speaker, "speakerIdSettings",
            "speakerIdSettings", {})
 
     def set_form_desc(d, v):
@@ -142,17 +142,17 @@ def main() -> int:
         params[0]["description"] = v
 
     if et_ref:
-        probar("Page.form.parameters[0].description", page_name, set_form_desc, "form",
-               "form.parameters.description", "descripcion de prueba")
+        test_field("Page.form.parameters[0].description", page_name, set_form_desc, "form",
+               "form.parameters.description", "test description")
 
     def set_route_tp(d, v):
-        rutas = d.setdefault("transitionRoutes", [])
-        if not rutas:
-            rutas.append({"condition": "true"})
-        rutas[0]["targetPlaybook"] = v
+        routes = d.setdefault("transitionRoutes", [])
+        if not routes:
+            routes.append({"condition": "true"})
+        routes[0]["targetPlaybook"] = v
 
     if pb_ref:
-        probar("Page.transitionRoutes[0].targetPlaybook", page_name, set_route_tp,
+        test_field("Page.transitionRoutes[0].targetPlaybook", page_name, set_route_tp,
                "transitionRoutes", "transitionRoutes.targetPlaybook", pb_ref)
 
     print("\n== FLOW ==")
@@ -160,29 +160,29 @@ def main() -> int:
     def set_nlu(d, v):
         d.setdefault("nluSettings", {})["customConfigKey"] = v
 
-    probar("Flow.nluSettings.customConfigKey", flow_name, set_nlu, "nluSettings",
-           "nluSettings.customConfigKey", "mi-clave-propia")
+    test_field("Flow.nluSettings.customConfigKey", flow_name, set_nlu, "nluSettings",
+           "nluSettings.customConfigKey", "my-own-key")
 
     def set_modelid(d, v):
         d["modelIdentifier"] = v
 
-    probar("Flow.modelIdentifier", flow_name, set_modelid, "modelIdentifier",
+    test_field("Flow.modelIdentifier", flow_name, set_modelid, "modelIdentifier",
            "modelIdentifier", {"modelId": "11111111-2222-3333-4444-555555555555"})
 
     print("\n== TOOL (temporary) ==")
     tool = post(f"{api._base(project)}/agents/{agent}/tools",
                 {"displayName": "zz_tmp_tool_probe",
-                 "description": "temporal",
+                 "description": "temporary",
                  "openApiSpec": {"textSchema": '{"type":"object"}'}})
     tool_name = tool.get("name", "")
     if tool_name:
-        atexit.register(lambda: borrar(f"{api._base(project)}/agents/{agent}/tools/"
+        atexit.register(lambda: delete(f"{api._base(project)}/agents/{agent}/tools/"
                                        + tool_name.rsplit("/", 1)[-1]))
 
         def set_actionschemas(d, v):
             d["actionSchemas"] = v
 
-        probar("Tool.actionSchemas", tool_name, set_actionschemas, "actionSchemas",
+        test_field("Tool.actionSchemas", tool_name, set_actionschemas, "actionSchemas",
                "actionSchemas", [{"name": "probe",
                                   "inputParameters": [{"name": "q", "schema": "{\"type\":\"string\"}"}],
                                   "outputParameters": []}])
@@ -195,13 +195,13 @@ def main() -> int:
                "entities": [{"value": "uno", "synonyms": ["uno"], "dtmfPattern": "1"}]})
     et_name = et.get("name", "")
     if et_name:
-        atexit.register(lambda: borrar(f"{api._base(project)}/agents/{agent}/entityTypes/"
+        atexit.register(lambda: delete(f"{api._base(project)}/agents/{agent}/entityTypes/"
                                        + et_name.rsplit("/", 1)[-1]))
 
         def set_dtmf(d, v):
             d["entities"][0]["dtmfPattern"] = v
 
-        probar("EntityType.entities[0].dtmfPattern", et_name, set_dtmf, "entities",
+        test_field("EntityType.entities[0].dtmfPattern", et_name, set_dtmf, "entities",
                "entities.dtmfPattern", "9")
     else:
         print("  the temporary entityType could not be created:", json.dumps(et)[:200])
@@ -212,13 +212,13 @@ def main() -> int:
                    "trainingPhrases": [{"parts": [{"text": "hola"}], "repeatCount": 1}]})
     intent_name = intent.get("name", "")
     if intent_name:
-        atexit.register(lambda: borrar(f"{api._base(project)}/agents/{agent}/intents/"
+        atexit.register(lambda: delete(f"{api._base(project)}/agents/{agent}/intents/"
                                        + intent_name.rsplit("/", 1)[-1]))
 
         def set_auto(d, v):
             d["trainingPhrases"][0]["parts"][0]["auto"] = v
 
-        probar("Intent.trainingPhrases[0].parts[0].auto", intent_name, set_auto,
+        test_field("Intent.trainingPhrases[0].parts[0].auto", intent_name, set_auto,
                "trainingPhrases", "trainingPhrases.parts.auto", False)
     else:
         print("  the temporary intent could not be created:", json.dumps(intent)[:200])
@@ -229,18 +229,18 @@ def main() -> int:
     def set_webclient(d, v):
         d["webClientSettings"] = v
 
-    probar("Agent.webClientSettings.boxBorderRadius", agent_name, set_webclient,
+    test_field("Agent.webClientSettings.boxBorderRadius", agent_name, set_webclient,
            "webClientSettings", "webClientSettings.boxBorderRadius", "8")
 
     def set_agent_adv(d, v):
         d.setdefault("advancedSettings", {})["enabled"] = v
 
-    probar("Agent.advancedSettings.enabled", agent_name, set_agent_adv, "advancedSettings",
+    test_field("Agent.advancedSettings.enabled", agent_name, set_agent_adv, "advancedSettings",
            "advancedSettings.enabled", True)
 
     print("\n== SUMMARY ==")
-    for etiqueta, ok, det in RESULTADOS:
-        print(f"  {'OK ' if ok else 'NO '} {etiqueta:<58} {det}")
+    for label, ok, det in RESULTS:
+        print(f"  {'OK ' if ok else 'NO '} {label:<58} {det}")
     return 0
 
 

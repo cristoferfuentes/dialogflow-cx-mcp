@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from _redact import escribe_privado
+from _redact import write_private
 
 from cxp.chrome_cdp import RealChrome
 from cxp.config import PKG_DIR, load_config
@@ -33,7 +33,7 @@ from cxp.config import PKG_DIR, load_config
 NECESARIAS = ("SAPISID", "SID", "HSID", "SSID", "APISID")
 
 
-def cookies_google(page) -> dict[str, str]:
+def google_cookies(page) -> dict[str, str]:
     """The `.google.com` cookies of the browser."""
     out: dict[str, str] = {}
     for c in page.context.cookies():
@@ -59,37 +59,37 @@ def main() -> int:
     chrome.connect()
     time.sleep(2)
     try:
-        galletas = cookies_google(chrome.page)
+        cookies = google_cookies(chrome.page)
     finally:
         try:
             chrome.close()
         except Exception:
             pass
 
-    faltan = [n for n in NECESARIAS if not galletas.get(n)]
-    print(f"google.com cookies: {len(galletas)} | missing the required ones: {faltan or 'none'}")
+    missing = [n for n in NECESARIAS if not cookies.get(n)]
+    print(f"google.com cookies: {len(cookies)} | missing the required ones: {missing or 'none'}")
     if args.check:
-        return 1 if faltan else 0
-    if faltan:
+        return 1 if missing else 0
+    if missing:
         print("the browser has no session: open the console with your account and repeat")
         return 1
 
     # The WHOLE jar is written, not just the 5: with 5 cookies the backend
     # answers 401 as soon as the session is renewed (measured 2026-11-13).
-    cookie = "; ".join(f"{n}={galletas[n]}" for n in sorted(galletas))
-    texto = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
-    nuevo = []
-    for linea in texto.splitlines():
-        if linea.startswith("CXP_COOKIE="):
-            nuevo.append(f'CXP_COOKIE="{cookie}"')
-        elif linea.startswith("CXP_SAPISID="):
-            nuevo.append(f"CXP_SAPISID={galletas['SAPISID']}")
+    cookie = "; ".join(f"{n}={cookies[n]}" for n in sorted(cookies))
+    text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    new_lines = []
+    for line in text.splitlines():
+        if line.startswith("CXP_COOKIE="):
+            new_lines.append(f'CXP_COOKIE="{cookie}"')
+        elif line.startswith("CXP_SAPISID="):
+            new_lines.append(f"CXP_SAPISID={cookies['SAPISID']}")
         else:
-            nuevo.append(linea)
-    if not any(linea.startswith("CXP_COOKIE=") for linea in nuevo):
-        nuevo.append(f'CXP_COOKIE="{cookie}"')
+            new_lines.append(line)
+    if not any(line.startswith("CXP_COOKIE=") for line in new_lines):
+        new_lines.append(f'CXP_COOKIE="{cookie}"')
     # The .env carries the session cookies: only its owner can read it.
-    escribe_privado(env_path, "\n".join(nuevo) + "\n")
+    write_private(env_path, "\n".join(new_lines) + "\n")
     os.chmod(env_path, stat.S_IRUSR | stat.S_IWUSR)
     print(f"cookies updated in {env_path}")
     return 0

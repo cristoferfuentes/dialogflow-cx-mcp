@@ -64,7 +64,7 @@ passthrough — can reach an agent that is not on the list.
 | the path is **canonicalized** before it is sent (`.`/`..` resolved, `%2e`/`%2f` rejected) | the server resolves `..`, so `agents/OK/../../agents/FORBIDDEN` would land on `FORBIDDEN` while the guard read `OK` |
 | `cx_batch` checks **each sub-request** | a batch must not be a way around the allowlist |
 
-The behaviour is pinned by `tests/test_guard_seguridad.py`.
+The behaviour is pinned by `tests/test_security_guard.py`.
 
 If you ever believe you leaked your cookies: **sign out of Google** to invalidate the
 session, then paste a fresh header into your `.env`.

@@ -16,7 +16,7 @@ Three questions, three measurements:
 3. **FIELD**: which fields does the backend expose that the public proto does NOT
    declare? (live sweep, reuses `cxp.gaps.scan_agent`).
 
-    .venv/bin/python probes/paridad_consola.py [--agente <uuid>] [--json /tmp/paridad.json]
+    .venv/bin/python probes/console_parity.py [--agent <uuid>] [--json /tmp/parity.json]
 """
 from __future__ import annotations
 
@@ -28,82 +28,82 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from cxp import console_endpoints
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, ConsoleApi
-from cxp.console_endpoints import HUECOS_METODO
 from cxp.gaps import load_schema_index, scan_agent
 from cxp.httpclient import Session
 
 # The endpoints the console calls that are NOT in any discovery doc.
-# They come from the captured traffic (probes/captura_trafico_consola.py): the console
+# They come from the captured traffic (probes/capture_console_traffic_cdp.py): the console
 # catalog plus the one of projects, which was NOT in `cxp/console_endpoints.py`.
-ENDPOINT_PROYECTOS = {
+ENDPOINT_PROJECTS = {
     "id": "projects.list",
     "version": "v3alpha1",
-    "metodo": "GET",
+    "method": "GET",
     "path": "projects",
-    "estado": "verificado",
-    "para_que": "The project listing (what the console project selector "
+    "status": "verified",
+    "purpose": "The project listing (what the console project selector "
                 "paints). It calls it with `filter=id=\"<project>\"` and "
                 "`view=FULL`. It is NOT in any discovery doc.",
-    "respuesta": "{\"projects\":[{\"name\":\"projects/my-project\", ...}]}",
+    "response": "{\"projects\":[{\"name\":\"projects/my-project\", ...}]}",
 }
 
 
-def _estado(cons: ConsoleApi, version: str, ruta: str, query: dict | None = None) -> dict:
+def _status(cons: ConsoleApi, version: str, route: str, query: dict | None = None) -> dict:
     """Calls a console endpoint and summarizes the result."""
-    url = f"https://{CONSOLE_HOST}/{version}/{ruta.lstrip('/')}?key={cons.cfg.api_key}"
+    url = f"https://{CONSOLE_HOST}/{version}/{route.lstrip('/')}?key={cons.cfg.api_key}"
     try:
         data = cons.request("GET", url, query=query)
     except Exception as exc:
-        return {"estado": "error", "detalle": str(exc)[:200]}
+        return {"status": "error", "detail": str(exc)[:200]}
     if isinstance(data, dict):
-        claves = sorted(data.keys())
-        vacio = not claves
+        keys = sorted(data.keys())
+        empty = not keys
     else:
-        claves = []
-        vacio = not data
-    return {"estado": "ok_vacio" if vacio else "ok", "claves": claves}
+        keys = []
+        empty = not data
+    return {"status": "empty" if empty else "ok", "keys": keys}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
     ap.add_argument("--location-extra", default="us-central1")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
-    res: dict = {"agente": agente, "proyecto": proyecto}
+    res: dict = {"agent": agent, "project": project}
 
     # ------------------------------------------- 1) endpoints outside any doc
     print("=" * 78)
     print("1) CONSOLE ENDPOINTS THAT ARE NOT IN ANY DISCOVERY DOC")
     print("=" * 78)
-    catalogo = list(HUECOS_METODO) + [ENDPOINT_PROYECTOS]
-    metodos: list[dict] = []
-    for h in catalogo:
-        ruta = (h.get("path") or "").replace("{project}", proyecto) \
+    catalog = list(console_endpoints.METHOD_GAPS) + [ENDPOINT_PROJECTS]
+    methods: list[dict] = []
+    for h in catalog:
+        route = (h.get("path") or "").replace("{project}", project) \
                                  .replace("{location}", cfg.location) \
-                                 .replace("{agent}", agente)
-        if not ruta.startswith("projects/"):
-            ruta = "/" + ruta
+                                 .replace("{agent}", agent)
+        if not route.startswith("projects/"):
+            route = "/" + route
         q = None
         if h["id"] == "projects.list":
-            q = {"filter": f'id="{proyecto}"', "view": "FULL"}
+            q = {"filter": f'id="{project}"', "view": "FULL"}
         t0 = time.perf_counter()
-        est = _estado(cons, h.get("version", "v3alpha1"), ruta, q)
+        state = _status(cons, h.get("version", "v3alpha1"), route, q)
         ms = (time.perf_counter() - t0) * 1000
-        fila = {"id": h["id"], "version": h.get("version"), "ruta": ruta,
-                "vivo": est, "ms": round(ms)}
-        metodos.append(fila)
-        print(f"  {h['id']:<28} {est['estado']:<9} {ms:>6.0f} ms  "
-              f"{','.join(est.get('claves') or [])[:60]}")
-    res["endpoints_fuera_de_descriptor"] = metodos
+        row = {"id": h["id"], "version": h.get("version"), "route": route,
+               "live": state, "ms": round(ms)}
+        methods.append(row)
+        print(f"  {h['id']:<28} {state['status']:<9} {ms:>6.0f} ms  "
+              f"{','.join(state.get('keys') or [])[:60]}")
+    res["endpoints_outside_descriptor"] = methods
 
     # ------------------------------------------------ 2) regional hosts
     print()
@@ -112,7 +112,7 @@ def main() -> int:
     print("=" * 78)
     loc = args.location_extra
     host = f"{loc}-{CONSOLE_HOST}"
-    url = (f"https://{host}/v3alpha1/projects/{proyecto}/locations/{loc}/agents"
+    url = (f"https://{host}/v3alpha1/projects/{project}/locations/{loc}/agents"
            f"?key={cfg.api_key}")
     cabeceras = cons._headers()
     # MEASURED: the `referer` has to carry the HOST that is called; `x-origin` and
@@ -121,24 +121,24 @@ def main() -> int:
     regional = {}
     try:
         data = Session().json("GET", url, cabeceras, None, timeout=60)
-        agentes = data.get("agents") or []
-        regional = {"estado": "ok", "host": host, "agentes": len(agentes),
-                    "nombres": [a.get("displayName") for a in agentes][:5]}
-        print(f"  {host} -> OK, {len(agentes)} agents: {regional['nombres']}")
+        agents = data.get("agents") or []
+        regional = {"status": "ok", "host": host, "agents": len(agents),
+                    "names": [a.get("displayName") for a in agents][:5]}
+        print(f"  {host} -> OK, {len(agents)} agents: {regional['names']}")
     except Exception as exc:
-        regional = {"estado": "error", "host": host, "detalle": str(exc)[:200]}
+        regional = {"status": "error", "host": host, "detail": str(exc)[:200]}
         print(f"  {host} -> ERROR {str(exc)[:150]}")
     # The global host does NOT work for another location:
     try:
         Session().json(
             "GET",
-            f"https://{CONSOLE_HOST}/v3beta1/projects/{proyecto}/locations/{loc}"
+            f"https://{CONSOLE_HOST}/v3beta1/projects/{project}/locations/{loc}"
             f"/agents?key={cfg.api_key}",
             cons._headers(), None, timeout=60)
-        global_ = {"estado": "ok"}
+        global_ = {"status": "ok"}
     except Exception as exc:
-        global_ = {"estado": "error", "detalle": str(exc)[:200]}
-    print(f"  {CONSOLE_HOST} (global host, location={loc}) -> {global_['estado']}")
+        global_ = {"status": "error", "detail": str(exc)[:200]}
+    print(f"  {CONSOLE_HOST} (global host, location={loc}) -> {global_['status']}")
     res["regional"] = {**regional, "host_global": global_}
 
     # ------------------------------------------------------ 3) field gaps
@@ -147,14 +147,14 @@ def main() -> int:
     print("3) FIELDS: live sweep of the agent")
     print("=" * 78)
     idx = load_schema_index(cfg.api_version)
-    barrido = scan_agent(cons, agente, proyecto, idx=idx)
-    print(f"  collections in the discovery doc: {barrido['colecciones']}")
-    print(f"  reached: {len(barrido['colecciones_alcanzables'])}"
-          f" | not reached: {len(barrido['sin_alcanzar'])}")
-    for s in barrido["sin_alcanzar"]:
-        print(f"    - {s['coleccion']}: {s['motivo'][:90]}")
-    print(f"  grouped field gaps: {len(barrido['huecos'])}")
-    res["barrido"] = barrido
+    sweep = scan_agent(cons, agent, project, idx=idx)
+    print(f"  collections in the discovery doc: {sweep['collections']}")
+    print(f"  reached: {len(sweep['reachable_collections'])}"
+          f" | not reached: {len(sweep['unreachable'])}")
+    for s in sweep["unreachable"]:
+        print(f"    - {s['collection']}: {s['reason'][:90]}")
+    print(f"  grouped field gaps: {len(sweep['gaps'])}")
+    res["sweep"] = sweep
 
     if args.json:
         Path(args.json).write_text(json.dumps(res, ensure_ascii=False, indent=1),

@@ -33,13 +33,13 @@ def main() -> int:
     assert_writable(cfg.project, agent, cfg)
     api = ConsoleApi(cfg)
     base = f"{api._base('')}/agents/{agent}"
-    creados: list[str] = []
+    created: list[str] = []
     try:
         # ---------------------------------------------- V1: macro in steps
         name1 = "zz_tmp_selfref_steps"
         body1 = {
             "displayName": name1,
-            "goal": "Playbook de prueba con autorreferencia en steps.",
+            "goal": "Test playbook with a self-reference in the steps.",
             "instruction": {"guidelines": "",
                             "steps": [{"text": f"Delega en ${{PLAYBOOK:{name1}}}"}]},
         }
@@ -48,7 +48,7 @@ def main() -> int:
             pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                              body=body1, timeout=120.0)
             pid = pb["name"].split("/")[-1]
-            creados.append(pid)
+            created.append(pid)
             print(f"   CREATED (unexpected): {pid}")
             print("   referencedPlaybooks:", pb.get("referencedPlaybooks"))
         except HttpStatusError as e:
@@ -58,9 +58,9 @@ def main() -> int:
         name2 = "zz_tmp_selfref_guidelines"
         body2 = {
             "displayName": name2,
-            "goal": "Playbook de prueba con autorreferencia en guidelines.",
+            "goal": "Test playbook with a self-reference in the guidelines.",
             "instruction": {"guidelines": f"Delega en ${{PLAYBOOK:{name2}}}",
-                            "steps": [{"text": "Paso limpio sin macros."}]},
+                            "steps": [{"text": "Clean step without macros."}]},
         }
         print("\n=== V2: self-referencing macro in `guidelines` ===")
         pid2 = None
@@ -68,7 +68,7 @@ def main() -> int:
             pb = api.request("POST", api._url(f"{base}/playbooks", alt="json"),
                              body=body2, timeout=120.0)
             pid2 = pb["name"].split("/")[-1]
-            creados.append(pid2)
+            created.append(pid2)
             print(f"   CREATED: {pid2}  ({pb.get('displayName')})")
             print(f"   referencedPlaybooks: {pb.get('referencedPlaybooks')}  <-- edge registered?")
             print(f"   instruction.guidelines: {(pb.get('instruction') or {}).get('guidelines')!r}")
@@ -104,16 +104,16 @@ def main() -> int:
 
     finally:
         print("\n=== cleanup ===")
-        for pid in creados:
+        for pid in created:
             try:
                 api.request("DELETE", api._url(f"{base}/playbooks/{pid}", alt="json",
                                               force="true"))
                 print(f"   playbook {pid} deleted")
             except HttpStatusError as e:
                 print(f"   !! could not delete {pid}: HTTP {e.status} {e.body[:160]}")
-        vivos = [p for p in api.list_playbooks(agent)
+        alive = [p for p in api.list_playbooks(agent)
                  if (p.get("displayName") or "").startswith("zz_tmp_")]
-        print("   zz_tmp_ playbooks left:", len(vivos))
+        print("   zz_tmp_ playbooks left:", len(alive))
     return 0
 
 

@@ -32,8 +32,8 @@ Measured 2026-11-16:
 ## Extraction script (raw JSON + readable Markdown + index)
 
 ```bash
-.venv/bin/python probes/exp_logs_conversaciones.py \
-    --agente <agent-uuid> --proyecto <project-id> \
+.venv/bin/python probes/exp_conversation_logs.py \
+    --agent <agent-uuid> --project <project-id> \
     --session <id> --session <id> ...
 ```
 
@@ -52,15 +52,15 @@ Measured 2026-11-16: there are **three** paths and **only one** is really public
 Setup (static server + tunnel, both as systemd services):
 
 ```bash
-# 1) server: probes/sirve_logs.py -> 127.0.0.1:8099, no directory listing, no
+# 1) server: probes/serve_logs.py -> 127.0.0.1:8099, no directory listing, no
 #    dotfiles, no POST, and WITH Range support (206).
-# 2) tunnel: probes/tunnel_publico.sh -> cloudflared --url http://127.0.0.1:8099
+# 2) tunnel: probes/public_tunnel.sh -> cloudflared --url http://127.0.0.1:8099
 ```
 
 * `sirve-logs-conversaciones.service` — the static server.
 * `tunnel-logs-publico.service` — the tunnel (starts on its own, `Restart=always`).
 * The live URL is stored in `logs-conversaciones/.url-publica` and read with
-  `probes/url_publica.sh`.
+  `probes/public_url.sh`.
 
 **TRAP (measured):** the quick tunnel generates a **RANDOM subdomain on every start**
 => when the service restarts the URL **changes** and has to be shared again. It

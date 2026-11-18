@@ -15,12 +15,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 FRAME_URL = (
     "https://conversational-agents.cloud.google.com/cx/projects/{p}/locations/{l}/agents/{a}"
     "/flows/{f}?pageId={pg}&embedded=true"

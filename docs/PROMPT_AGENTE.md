@@ -32,15 +32,15 @@ are missing.
    which permission has to be added** (which agent, and `CXP_AGENT_READ` or
    `CXP_AGENT_READWRITE`).
 
-**Before the first call:** call `cx_status`. If `credenciales_ok` is `false` or
-`sesion_aceptada` is `false`, **stop**: the credentials are wrong or the Google session
-expired. Tell the user (there is no way to fix it from the MCP). If `permisos_ok` is
+**Before the first call:** call `cx_status`. If `credentials_ok` is `false` or
+`session_accepted` is `false`, **stop**: the credentials are wrong or the Google session
+expired. Tell the user (there is no way to fix it from the MCP). If `permissions_ok` is
 `false`, the allowlist has no agent: tell the user to add one to `CXP_AGENT_READ` or
 `CXP_AGENT_READWRITE`.
 
-`cx_status` also returns the **permission table** (`permisos`), the allowed agent ids
-(`agentes_permitidos`, `agentes_solo_lectura`, `agentes_con_escritura`) and the rules
-above (`reglas`).
+`cx_status` also returns the **permission table** (`permissions`), the allowed agent ids
+(`allowed_agents`, `read_only_agents`, `writable_agents`) and the rules
+above (`rules`).
 
 **If you are going to write a lot (or to clone):** call `cx_limites_api()` **first**.
 There is the MCP's memory: the measured limits of the API (exact symptom -> cause ->
@@ -53,15 +53,16 @@ measured**: the official descriptor does not document it.
 - **Fewer writes > faster writes**: since the backend serializes, the only way to lower
   the total time is to **write less**.
 - **Verify at the end**, not after each write (each extra GET is ~0.5 s).
-- If an error comes with `causa`/`workaround` in the response, **that is the known
+- If an error comes with `cause`/`workaround` in the response, **that is the known
   workaround**: apply it instead of retrying blindly.
 
 **To clone an agent:** use `cx_clone_agent(source, destination)`; it carries the
 dependency order, the id remapping and the already-solved workarounds.
 
-**To work on an agent of the allowlist:** check the `permisos` table of `cx_status`.
-An agent without permission returns a clear error (`has no permission`); a read-only one,
-`READ-ONLY` (SOLO LECTURA). Do not look for workarounds.
+**To work on an agent of the allowlist:** check the `permissions` table of `cx_status`.
+An agent without permission returns a clear error (`has no permission`); a read-only one
+answers *"the agent X (project Y) is READ-ONLY (SOLO LECTURA): ..."*. Do not look for
+workarounds.
 
 **To choose which agent to work on:** there is **no default agent**. If you do not pass
 `agent=`, the tool works only when the allowlist leaves a single candidate; with several,
@@ -76,21 +77,21 @@ it answers with the list of the agents it can use and you must pick one.
 2. **Identify the route** by its `name` (uuid) or by its exact `condition`. Avoid
    indices if you can: they are fragile.
 3. **Simulate.** Call with `route`, `playbook` and `dry_run=true`. Check
-   `destino_actual` vs `destino_nuevo` and the `aviso`: if the route pointed to a page
-   or to a flow, that target **is erased** (they are a `oneof`).
+   `current_destination` vs `new_destination` and the `warning`: if the route pointed to a
+   page or to a flow, that target **is erased** (they are a `oneof`).
 4. **Write.** Repeat the call with `dry_run=false`.
-5. **Verify.** The response includes `verificado: true` and the already-updated routes.
-   If `verificado` is `false`, **say it**: the change is not confirmed.
+5. **Verify.** The response includes `verified: true` and the already-updated routes.
+   If `verified` is `false`, **say it**: the change is not confirmed.
 
 **How to use `cx_set_console_field` (an out-of-schema field):**
 
-1. **Discover** the field with `cx_gaps` (or look at the `catalogo`): it tells you the
-   resource, the schema and the state (`escribible` / `derivado`).
+1. **Discover** the field with `cx_gaps` (or look at the `catalogue`): it tells you the
+   resource, the schema and the state (`writable` / `derived`).
 2. **Simulate** with `dry_run=true`: it returns the expected diff and the `updateMask`
    that will be sent.
 3. **Write** with `dry_run=false`.
-4. **Read** the result: `verificado: true` and `descartado_por_el_servidor` (empty =
-   it was saved). If the field shows up in `descartado_por_el_servidor`, the server
+4. **Read** the result: `verified: true` and `dropped_by_the_server` (empty =
+   it was saved). If the field shows up in `dropped_by_the_server`, the server
    derives it: it is read-only.
 
 **Rules:**
@@ -104,7 +105,7 @@ it answers with the list of the agents it can use and you must pick one.
 - Every call re-signs the request (`SAPISIDHASH` with the current timestamp). There is
   nothing to refresh.
 - `targetPlaybook` values are not visible through the public API: to check the result,
-  use the `rutas` returned by the tool itself, not a public `GET`.
+  use the `routes` returned by the tool itself, not a public `GET`.
 - **Use `v3beta1` by default**, never `v3`. But if you need data that only exists in
   another version (the console speaks `v3alpha1`), pass `version="v3alpha1"` to
   `cx_api`: it is a single call, not a configuration change.
@@ -126,39 +127,39 @@ endpoints that **the console uses and that are in neither**
 
 ```
 cx_status()
-  -> credenciales_ok: true, sesion_aceptada: true
-  -> permisos: [{agente: <uuid>, permiso: read/write}, ...]
+  -> credentials_ok: true, session_accepted: true
+  -> permissions: [{agent: <uuid>, permission: read/write}, ...]
 
 cx_discover(filter="playbook")
-  -> total_metodos: 162
+  -> total_methods: 162
 
 cx_gaps(agent="<uuid>")
-  -> total_huecos: 29
-  -> huecos: [{esquema: "Tool", campo: "actionSchemas", ...}, ...]
-  -> catalogo: [{campo: "transitionRoutes[].targetPlaybook", estado: "escribible"}, ...]
-  -> cobertura: {colecciones_del_descriptor: 24, colecciones_alcanzadas: 22, ...}
+  -> total_gaps: 29
+  -> gaps: [{schema: "Tool", field: "actionSchemas", ...}, ...]
+  -> catalogue: [{field: "transitionRoutes[].targetPlaybook", status: "writable"}, ...]
+  -> coverage: {descriptor_collections: 24, reachable_collections: 22, ...}
 
-cx_gaps(agent="<uuid>", incluir_lab=True)
-  -> cobertura: {colecciones_del_descriptor: 24, colecciones_alcanzadas: 23, ...}
-  -> laboratorio: {agente_temporal: "...", errores: []}   # created and deleted
-  -> huecos_de_metodo: [{id: "systemEntityTypes.list", version: "v3alpha1", ...}, ...]
+cx_gaps(agent="<uuid>", include_lab=True)
+  -> coverage: {descriptor_collections: 24, reachable_collections: 23, ...}
+  -> lab: {temporary_agent: "...", errors: []}   # created and deleted
+  -> method_gaps: [{id: "systemEntityTypes.list", version: "v3alpha1", ...}, ...]
 
 cx_endpoints_consola(endpoint="agents.listAvailableModels")
-  -> estado: "ok"
-  -> datos: {generativeAgentModelConfig: {generativeAgentModels: [...]}}
+  -> status: "ok"
+  -> data: {generativeAgentModelConfig: {generativeAgentModels: [...]}}
 
 cx_get_flow(agent="<uuid>", flow="My_Flow")
-  -> rutas: [{name: "…", condition: "$session.params.canal = whatsapp",
+  -> routes: [{name: "…", condition: "$session.params.canal = whatsapp",
               target_kind: "targetPage", target_name: "26d926f7-…"}, …]
 
 cx_set_flow_route_playbook(agent="<uuid>", flow="My_Flow",
                             route="<route-uuid>",
                             playbook="my_target_playbook", dry_run=true)
-  -> destino_actual_nombre: my_previous_playbook
-     destino_nuevo_nombre:  my_target_playbook
+  -> current_destination_name: my_previous_playbook
+     new_destination_name:  my_target_playbook
 
 (cx_set_flow_route_playbook(..., dry_run=false))
-  -> verificado: true
+  -> verified: true
 ```
 
 ---

@@ -17,9 +17,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 from cxp.console_fields import set_field
-from cxp.gaps import read_path
+from cxp.gaps import read_path as read_path_at
 
-MATRIZ: list[tuple[str, bool, str]] = []
+MATRIX: list[tuple[str, bool, str]] = []
+
+
+def _get(res, *names, default=None):
+    """Reads an attribute of the result (the core renamed some of them)."""
+    for name in names:
+        if hasattr(res, name):
+            return getattr(res, name)
+    return default
+
+
+def _set(res, *names, value):
+    """Writes the attribute that exists (the core renamed some of them)."""
+    for name in names:
+        if hasattr(res, name):
+            setattr(res, name, value)
+            return
 
 
 def main() -> int:
@@ -30,37 +46,39 @@ def main() -> int:
     base = f"projects/{project}/locations/global/agents/{agent}"
     ab = api._base(project)
 
-    def probar(etiqueta, recurso, campo, valor, revertir=True, ruta_lectura=None):
-        """`ruta_lectura` = where to check the value after writing."""
+    def test_field(label, resource, field, value, revert=True, read_path=None):
+        """`read_path` = where to check the value after writing."""
         try:
-            res = set_field(api, recurso, campo, valor, dry_run=False, project=project)
-            if ruta_lectura:
-                actual = api.request("GET", api._url("/" + recurso))
-                res.despues = read_path(actual, ruta_lectura)
-                res.verificado = res.despues == valor
-            ok = res.verificado
-            MATRIZ.append((etiqueta, ok, json.dumps(res.despues, ensure_ascii=False)[:100]))
-            print(f"  [{'OK ' if ok else 'NO '}] {etiqueta}")
+            res = set_field(api, resource, field, value, dry_run=False, project=project)
+            if read_path:
+                actual = api.request("GET", api._url("/" + resource))
+                _set(res, "after", "despues", read_path_at(actual, read_path))
+                _set(res, "verified", "verificado",
+                     _get(res, "after", "despues") == value)
+            ok = bool(_get(res, "verified", "verificado"))
+            MATRIX.append((label, ok, json.dumps(_get(res, "after", "despues"), ensure_ascii=False)[:100]))
+            print(f"  [{'OK ' if ok else 'NO '}] {label}")
             if not ok:
-                print(f"        read: {json.dumps(res.despues, ensure_ascii=False)[:150]}")
+                print(f"        read: {json.dumps(_get(res, 'after', 'despues'), ensure_ascii=False)[:150]}")
                 if res.error:
                     print(f"        error: {res.error[:200]}")
-            if revertir and res.escrito:
-                set_field(api, recurso, campo, res.antes, dry_run=False, project=project)
+            if revert and _get(res, "written", "escrito"):
+                set_field(api, resource, field, _get(res, "before", "antes"),
+                          dry_run=False, project=project)
             return res
         except Exception as exc:
-            MATRIZ.append((etiqueta, False, f"{type(exc).__name__}: {exc}"))
-            print(f"  [ERR] {etiqueta}: {str(exc)[:220]}")
+            MATRIX.append((label, False, f"{type(exc).__name__}: {exc}"))
+            print(f"  [ERR] {label}: {str(exc)[:220]}")
             return None
 
     # ------------------------------------------------------------ temporary
     flow = api.request("POST", api._url(f"{ab}/agents/{agent}/flows"),
-                       {"displayName": "zz_tmp_gap_probe", "description": "temporal"})
+                       {"displayName": "zz_tmp_gap_probe", "description": "temporary"})
     flow_id = flow["name"].rsplit("/", 1)[-1]
     atexit.register(lambda: api.request(
         "DELETE", api._url(f"{ab}/agents/{agent}/flows/{flow_id}")))
     page = api.request("POST", api._url(f"{ab}/agents/{agent}/flows/{flow_id}/pages"),
-                       {"displayName": "Pagina probe",
+                       {"displayName": "Probe page",
                         "entryFulfillment": {"messages": [{"text": {"text": ["hola"]}}]}})
     page_name = page.get("name", "")
 
@@ -71,68 +89,68 @@ def main() -> int:
     print(f"flow={flow_id} page={page_name.rsplit('/',1)[-1]}")
 
     print("\n== PAGE ==")
-    probar("Page.transitionRoutes (full array with targetPlaybook)", page_name,
+    test_field("Page.transitionRoutes (full array with targetPlaybook)", page_name,
            "transitionRoutes", [{"condition": "true", "targetPlaybook": pb_ref}],
-           revertir=False,
-           ruta_lectura="transitionRoutes[0].targetPlaybook")
+           revert=False,
+           read_path="transitionRoutes[0].targetPlaybook")
 
     # existing route -> change only the target
-    probar("Page.transitionRoutes[0].targetPlaybook (existing route)", page_name,
-           "transitionRoutes[0].targetPlaybook", pb_ref, revertir=False,
-           ruta_lectura="transitionRoutes[0].targetPlaybook")
+    test_field("Page.transitionRoutes[0].targetPlaybook (existing route)", page_name,
+           "transitionRoutes[0].targetPlaybook", pb_ref, revert=False,
+           read_path="transitionRoutes[0].targetPlaybook")
 
-    probar("Page.form.parameters[0].description (full array)", page_name, "form",
+    test_field("Page.form.parameters[0].description (full array)", page_name, "form",
            {"parameters": [{"displayName": "p1", "entityType": et_ref,
-                            "description": "descripcion de prueba"}]},
-           revertir=False, ruta_lectura="form.parameters[0].description")
+                            "description": "test description"}]},
+           revert=False, read_path="form.parameters[0].description")
 
-    probar("Page.speakerIdSettings", page_name, "speakerIdSettings",
+    test_field("Page.speakerIdSettings", page_name, "speakerIdSettings",
            {"enableSpeakerId": True})
-    probar("Page.advancedSettings.speechAdaptationSettings", page_name,
+    test_field("Page.advancedSettings.speechAdaptationSettings", page_name,
            "advancedSettings", {"speechAdaptationSettings": {"adaptation": True}})
-    probar("Page.advancedSettings.enabled", page_name, "advancedSettings", {"enabled": False})
+    test_field("Page.advancedSettings.enabled", page_name, "advancedSettings", {"enabled": False})
 
     print("\n== TOOL ==")
     tools = api.list_tools(agent, project)
-    origen = next((t for t in tools if t.get("openApiSpec")), None)
-    if origen:
-        cuerpo = {k: v for k, v in origen.items()
-                  if k not in ("name", "displayName", "etag", "createTime", "updateTime",
-                               "actionSchemas", "sharedSchemas")}
-        cuerpo["displayName"] = "zz_tmp_tool_probe"
-        cuerpo["description"] = "temporal"
+    source = next((t for t in tools if t.get("openApiSpec")), None)
+    if source:
+        body = {k: v for k, v in source.items()
+                if k not in ("name", "displayName", "etag", "createTime", "updateTime",
+                             "actionSchemas", "sharedSchemas")}
+        body["displayName"] = "zz_tmp_tool_probe"
+        body["description"] = "temporary"
         try:
-            nuevo = api.request("POST", api._url(f"{ab}/agents/{agent}/tools"), cuerpo)
-            tool_name = nuevo.get("name", "")
+            new_tool = api.request("POST", api._url(f"{ab}/agents/{agent}/tools"), body)
+            tool_name = new_tool.get("name", "")
             atexit.register(lambda: api.request(
                 "DELETE", api._url(f"{ab}/agents/{agent}/tools/"
                                    + tool_name.rsplit("/", 1)[-1])))
-            esquemas = [{"name": "probe_accion",
+            schemas = [{"name": "probe_action",
                          "inputParameters": [{"name": "q", "schema": '{"type":"string"}'}],
                          "outputParameters": []}]
-            probar("Tool.actionSchemas (tool with openApiSpec)", tool_name,
-                   "actionSchemas", esquemas)
+            test_field("Tool.actionSchemas (tool with openApiSpec)", tool_name,
+                        "actionSchemas", schemas)
         except Exception as exc:
             print("  [ERR] temporary tool:", str(exc)[:240])
 
     # data store tool (without openApiSpec): the summarization model
-    origen_ds = next((t for t in tools if t.get("dataStoreSpec")), None)
-    if origen_ds:
-        cuerpo = {k: v for k, v in origen_ds.items()
-                  if k not in ("name", "displayName", "etag", "createTime", "updateTime",
-                               "actionSchemas", "sharedSchemas")}
-        cuerpo["displayName"] = "zz_tmp_ds_probe"
+    source_ds = next((t for t in tools if t.get("dataStoreSpec")), None)
+    if source_ds:
+        body = {k: v for k, v in source_ds.items()
+                if k not in ("name", "displayName", "etag", "createTime", "updateTime",
+                             "actionSchemas", "sharedSchemas")}
+        body["displayName"] = "zz_tmp_ds_probe"
         try:
-            nuevo = api.request("POST", api._url(f"{ab}/agents/{agent}/tools"), cuerpo)
-            ds_name = nuevo.get("name", "")
+            new_tool = api.request("POST", api._url(f"{ab}/agents/{agent}/tools"), body)
+            ds_name = new_tool.get("name", "")
             atexit.register(lambda: api.request(
                 "DELETE", api._url(f"{ab}/agents/{agent}/tools/"
                                    + ds_name.rsplit("/", 1)[-1])))
-            ds = dict(cuerpo.get("dataStoreSpec") or {})
+            ds = dict(body.get("dataStoreSpec") or {})
             ds["models"] = {"summarizationModel": {"model": "default"}}
-            probar("Tool.dataStoreSpec.models.summarizationModel.model", ds_name,
-                   "dataStoreSpec", ds, revertir=False,
-                   ruta_lectura="dataStoreSpec.models.summarizationModel.model")
+            test_field("Tool.dataStoreSpec.models.summarizationModel.model", ds_name,
+                        "dataStoreSpec", ds, revert=False,
+                        read_path="dataStoreSpec.models.summarizationModel.model")
         except Exception as exc:
             print("  [ERR] temporary ds tool:", str(exc)[:240])
 
@@ -146,7 +164,7 @@ def main() -> int:
         atexit.register(lambda: api.request(
             "DELETE", api._url(f"{ab}/agents/{agent}/entityTypes/"
                                + et_name.rsplit("/", 1)[-1])))
-        probar("EntityType.entities[0].dtmfPattern", et_name,
+        test_field("EntityType.entities[0].dtmfPattern", et_name,
                "entities[0].dtmfPattern", "9")
     except Exception as exc:
         print("  [ERR] entityType:", str(exc)[:240])
@@ -161,27 +179,27 @@ def main() -> int:
         atexit.register(lambda: api.request(
             "DELETE", api._url(f"{ab}/agents/{agent}/intents/"
                                + intent_name.rsplit("/", 1)[-1])))
-        probar("Intent.trainingPhrases (full array with auto=False)", intent_name,
+        test_field("Intent.trainingPhrases (full array with auto=False)", intent_name,
                "trainingPhrases",
                [{"parts": [{"text": "hola", "auto": False}], "repeatCount": 1}],
-               revertir=False,
-               ruta_lectura="trainingPhrases[0].parts[0].auto")
+               revert=False,
+               read_path="trainingPhrases[0].parts[0].auto")
     except Exception as exc:
         print("  [ERR] intent:", str(exc)[:240])
 
     print("\n== AGENT ==")
-    probar("Agent.webClientSettings", base, "webClientSettings",
+    test_field("Agent.webClientSettings", base, "webClientSettings",
            {"boxBorderRadius": "8"})
-    probar("Agent.advancedSettings (playbackInterruption)", base, "advancedSettings",
+    test_field("Agent.advancedSettings (playbackInterruption)", base, "advancedSettings",
            {"playbackInterruptionSettings": {"allowPlaybackInterruption": False}})
-    probar("Agent.advancedSettings (speechSettings)", base, "advancedSettings",
+    test_field("Agent.advancedSettings (speechSettings)", base, "advancedSettings",
            {"speechSettings": {"enableSmartEndpointing": False}})
-    probar("Agent.advancedSettings (enabled)", base, "advancedSettings",
+    test_field("Agent.advancedSettings (enabled)", base, "advancedSettings",
            {"enabled": True})
 
     print("\n== MATRIX ==")
-    for etiqueta, ok, det in MATRIZ:
-        print(f"  {'WRITABLE' if ok else 'not      '} | {etiqueta:<58} | {det}")
+    for label, ok, det in MATRIX:
+        print(f"  {'WRITABLE' if ok else 'not      '} | {label:<58} | {det}")
     return 0
 
 

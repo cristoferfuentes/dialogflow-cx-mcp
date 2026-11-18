@@ -102,18 +102,18 @@ class CxApi:
         for f in flows:
             if f["name"].endswith(f"/{flow}") or f.get("displayName") == flow:
                 return f["name"].split("/")[-1]
-        raise LookupError(f"flow no encontrado: {flow}")
+        raise LookupError(f"flow not found: {flow}")
 
     def resolve_page(self, agent_id: str, flow_id: str, page: str, backend: str = "public") -> str:
         pages = self.list_pages(agent_id, flow_id, backend)
         for p in pages:
             if p["name"].endswith(f"/{page}") or p.get("displayName") == page:
                 return p["name"].split("/")[-1]
-        raise LookupError(f"pagina no encontrada: {page}")
+        raise LookupError(f"page not found: {page}")
 
     def resolve_playbook(self, agent_id: str, playbook: str, backend: str = "public") -> str:
         pbs = self.list_playbooks(agent_id, backend)
         for p in pbs:
             if p["name"].endswith(f"/{playbook}") or p.get("displayName") == playbook:
                 return p["name"].split("/")[-1]
-        raise LookupError(f"playbook no encontrado: {playbook}")
+        raise LookupError(f"playbook not found: {playbook}")

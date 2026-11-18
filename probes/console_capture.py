@@ -19,8 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import targets_de_sonda
-from _redact import escribe_json_privado
+from _entorno import probe_targets
+from _redact import write_json_private
 
 from cxp.auth import pick_sapisid
 from cxp.browser import ConsoleBrowser
@@ -29,7 +29,7 @@ from cxp.config import load_config
 OUT = Path(__file__).resolve().parent / "console_capture"
 
 # Pages where there are routes we know exist.
-TARGETS = targets_de_sonda()
+TARGETS = probe_targets()
 
 
 def wait_for_session(cfg, minutes: int) -> bool:
@@ -60,11 +60,11 @@ def wait_for_session(cfg, minutes: int) -> bool:
             src = cfg.real_profile_dir / "Default" / "Cookies"
             tmp = Path("/tmp/_ck_probe.db")
             shutil.copy(src, tmp)
-            con = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
-            rows = list(con.execute(
+            conn = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+            rows = list(conn.execute(
                 "select name, encrypted_value from cookies where host_key like '%google%'"
             ))
-            con.close()
+            conn.close()
             if any(n in ("__Secure-3PSID", "SAPISID", "__Secure-1PSID") for n, _ in rows):
                 print(f"== SESSION DETECTED in the real profile: {[n for n, _ in rows]}", flush=True)
                 return True
@@ -134,27 +134,27 @@ def main() -> int:
         text = br._page.inner_text("body")
     except Exception:
         text = "<no text>"
-    reqs = br.stop_recording()
+    requests = br.stop_recording()
 
     (OUT / f"dom_{args.agent}.html").write_text(dom, encoding="utf-8")
     (OUT / f"text_{args.agent}.txt").write_text(text, encoding="utf-8")
-    escribe_json_privado(OUT / f"requests_{args.agent}.json", reqs)
+    write_json_private(OUT / f"requests_{args.agent}.json", requests)
 
     summary = {
         "url": br._page.url,
-        "titulo": br._page.title(),
+        "title": br._page.title(),
         "dom_bytes": len(dom),
-        "texto": text[:4000],
-        "peticiones": [
+        "text": text[:4000],
+        "requests": [
             {"method": r["method"], "url": r["url"], "status": r.get("status"),
              "post_len": len(r.get("post_data") or "")}
-            for r in reqs
+            for r in requests
         ],
     }
     (OUT / f"summary_{args.agent}.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
     print("== capture saved in", OUT, flush=True)
-    print("== title:", summary["titulo"], flush=True)
-    for p in summary["peticiones"]:
+    print("== title:", summary["title"], flush=True)
+    for p in summary["requests"]:
         print(f"   {p['status']} {p['method']} {p['url'][:130]}", flush=True)
     br.close()
     return 0

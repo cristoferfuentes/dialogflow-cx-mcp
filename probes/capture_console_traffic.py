@@ -18,13 +18,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
-from _redact import escribe_json_privado
+from _entorno import probe_agents
+from _redact import write_json_private
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 CONSOLE_URL = (
     "https://conversational-agents.cloud.google.com/projects/{p}/locations/{l}/agents/{a}"
     "/(cx/flows/{f}/flow_creation//right-panel:simulator)?pageId={pg}"
@@ -128,7 +128,7 @@ def main() -> int:
                 print(f"        targetPlaybook: {r.get('targetPlaybook')}", flush=True)
 
     if args.out:
-        escribe_json_privado(args.out,
+        write_json_private(args.out,
                              {"requests": requests,
                               "bodies": [{"url": u, "body": b} for u, b in bodies]})
         print(f"== written {args.out}", flush=True)

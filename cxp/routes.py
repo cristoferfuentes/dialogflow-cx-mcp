@@ -31,7 +31,7 @@ def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
     """Locate the route by `name` (uuid), by exact condition, or by index."""
     if isinstance(ref, int):
         if not 0 <= ref < len(routes):
-            raise LookupError(f"indice de ruta fuera de rango: {ref} (hay {len(routes)})")
+            raise LookupError(f"route index out of range: {ref} (there are {len(routes)})")
         return ref, routes[ref]
     for i, r in enumerate(routes):
         if r.get("name") == ref:
@@ -43,7 +43,7 @@ def find_route(routes: list[dict], ref: str | int) -> tuple[int, dict]:
     hits = [i for i, r in enumerate(routes) if ref and ref in (r.get("condition") or "")]
     if len(hits) == 1:
         return hits[0], routes[hits[0]]
-    raise LookupError(f"ruta no encontrada: {ref!r} (candidatas por condicion: {hits})")
+    raise LookupError(f"route not found: {ref!r} (candidates by condition: {hits})")
 
 
 def build_routes_with_playbook(
@@ -103,7 +103,7 @@ def set_route_playbook(
     page = api.get_page(agent_id, flow_id, page_id, backend=backend)
     routes = page.get("transitionRoutes") or []
     if not routes:
-        raise LookupError("la pagina no tiene transitionRoutes")
+        raise LookupError("the page has no transitionRoutes")
 
     index, current = find_route(routes, route_ref)
     playbook_resource = _playbook_resource(
@@ -113,18 +113,18 @@ def set_route_playbook(
 
     before = summarize(routes)
     result: dict[str, Any] = {
-        "agente": agent_id,
+        "agent": agent_id,
         "flow": flow_id,
-        "pagina": page_id,
+        "page": page_id,
         "backend": backend,
-        "ruta": {
-            "indice": index,
+        "route": {
+            "index": index,
             "name": current.get("name"),
             "condition": current.get("condition"),
-            "destino_antes": before[index]["target"],
-            "destino_despues": playbook_id,
+            "destination_before": before[index]["target"],
+            "destination_after": playbook_id,
         },
-        "rutas_antes": before,
+        "routes_before": before,
     }
 
     if dry_run:
@@ -144,12 +144,12 @@ def set_route_playbook(
 
     after_page = api.get_page(agent_id, flow_id, page_id, backend=backend)
     after_routes = after_page.get("transitionRoutes") or []
-    result["rutas_despues"] = summarize(after_routes)
-    result["rutas_totales"] = len(after_routes)
-    result["verificado_por_lectura"] = after_routes[index].get("targetPlaybook") == playbook_resource
-    result["nota"] = (
-        "El GET publico no expone targetPlaybook en las rutas; la verificacion real "
-        "es de RUNTIME (traza de la conversacion). Usa cx_verify_route_target."
+    result["routes_after"] = summarize(after_routes)
+    result["total_routes"] = len(after_routes)
+    result["verified_by_read"] = after_routes[index].get("targetPlaybook") == playbook_resource
+    result["note"] = (
+        "The public GET does not expose targetPlaybook in the routes; the real "
+        "verification is at RUNTIME (the conversation trace). Use cx_verify_route_target."
     )
     return result
 
@@ -162,7 +162,7 @@ def diff_routes(original: list[dict], clone: list[dict]) -> dict:
     for name, r in original:
         c = by_name_clone.get(name)
         if c is None:
-            rows.append({"name": name, "condition": r.get("condition"), "estado": "FALTA EN EL CLON"})
+            rows.append({"name": name, "condition": r.get("condition"), "status": "MISSING IN THE CLONE"})
             continue
         cond_same = (r.get("condition") or "") == (c.get("condition") or "")
         t_orig = next((k for k in TARGET_KEYS if r.get(k)), None)
@@ -171,16 +171,16 @@ def diff_routes(original: list[dict], clone: list[dict]) -> dict:
             {
                 "name": name,
                 "condition": r.get("condition"),
-                "condicion_igual": cond_same,
-                "destino_original": t_orig,
-                "destino_clon": t_clone,
-                "estado": "OK" if cond_same and t_orig == t_clone else "DIFIERE",
+                "condition_equal": cond_same,
+                "destination_original": t_orig,
+                "clone_destination": t_clone,
+                "status": "OK" if cond_same and t_orig == t_clone else "DIFFERS",
             }
         )
     for name, c in clone.items():
         if name not in by_name_orig:
-            rows.append({"name": name, "condition": c.get("condition"), "estado": "EXTRA EN EL CLON"})
-    return {"rutas": rows, "total": len(rows)}
+            rows.append({"name": name, "condition": c.get("condition"), "status": "EXTRA IN THE CLONE"})
+    return {"routes": rows, "total": len(rows)}
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,7 @@ def recreate_page_with_playbook(
     """Recreate the page with the target as playbook (CREATE instead of PATCH).
 
     Steps: CREATE with a temporary name -> DELETE of the old one -> rename ->
-    re-apuntar the incoming references (by id, only those pointing to the
+    re-point the incoming references (by id, only those pointing to the
     old page)."""
     from .guard import assert_writable
 
@@ -246,20 +246,20 @@ def recreate_page_with_playbook(
     created = api.http.json("POST", base, api._headers(), body, timeout=timeout)
     new_id = created["name"].split("/")[-1]
     out: dict[str, Any] = {
-        "estrategia": "DELETE+CREATE",
-        "pagina_vieja": page_id,
-        "pagina_nueva": new_id,
-        "ruta": {
-            "indice": index,
+        "strategy": "DELETE+CREATE",
+        "old_page": page_id,
+        "new_page": new_id,
+        "route": {
+            "index": index,
             "name": current.get("name"),
             "condition": current.get("condition"),
-            "destino": playbook_id,
+            "destination": playbook_id,
         },
-        "pasos": ["CREATE con nombre temporal", "DELETE de la pagina vieja"],
+        "steps": ["CREATE with a temporary name", "DELETE of the old page"],
     }
 
     api.http.json("DELETE", f"{base}/{page_id}", api._headers(), timeout=timeout)
-    out["pasos"].append("DELETE hecho")
+    out["steps"].append("DELETE done")
 
     if rename:
         api.update_page(
@@ -271,7 +271,7 @@ def recreate_page_with_playbook(
             backend=backend,
             timeout=timeout,
         )
-        out["pasos"].append("renombrada al displayName original")
+        out["steps"].append("renamed to the original displayName")
 
     if repoint:
         repointed = []
@@ -296,15 +296,15 @@ def recreate_page_with_playbook(
                         agent_id, fid, pid, payload, ",".join(sorted(set(mask))), backend=backend, timeout=timeout
                     )
                     repointed.append(f"{fid}/{pid}")
-        out["reapuntadas"] = repointed
-        out["pasos"].append(f"referencias re-apuntadas: {repointed}")
+        out["repointed"] = repointed
+        out["steps"].append(f"re-pointed references: {repointed}")
 
     check = api.get_page(agent_id, flow_id, new_id, backend=backend)
-    out["rutas"] = summarize(check.get("transitionRoutes") or [])
+    out["routes"] = summarize(check.get("transitionRoutes") or [])
     out["target_playbook_visible"] = any(
         "targetPlaybook" in r for r in (check.get("transitionRoutes") or [])
     )
-    out["nota"] = (
-        "El GET puede no exponer targetPlaybook; confirma con cx_verify_route_target."
+    out["note"] = (
+        "The GET may not expose targetPlaybook; confirm with cx_verify_route_target."
     )
     return out

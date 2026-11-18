@@ -16,14 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agente, targets_de_sonda
-from _redact import escribe_privado, redacta
+from _entorno import agent, probe_targets
+from _redact import redact, write_private
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
-ORIG = agente("por_defecto")
-_TARGET = next(iter(targets_de_sonda().values()), {"flow": "", "page": ""})
+ORIG = agent("default")
+_TARGET = next(iter(probe_targets().values()), {"flow": "", "page": ""})
 OF = _TARGET["flow"]
 OP = _TARGET["page"]
 
@@ -41,7 +41,7 @@ GROUPS = {
 
 
 def curl(headers: dict[str, str], url: str) -> tuple[int, str]:
-    escribe_privado("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redacta(headers).items()),
+    write_private("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redact(headers).items()),
                                     encoding="utf-8")
     r = subprocess.run(
         ["curl", "-sS", "--compressed", "--http2", "-o", "/tmp/abl_out.json",
@@ -105,21 +105,21 @@ def main() -> int:
     code, body = curl(fresh(base), url)
     print(f"A) COMPLETE                       -> HTTP {code}")
 
-    for nombre, claves in GROUPS.items():
-        h = {k: v for k, v in base.items() if k not in claves}
+    for name, keys in GROUPS.items():
+        h = {k: v for k, v in base.items() if k not in keys}
         code, body = curl(fresh(h), url)
-        print(f"B) without {nombre:28s} -> HTTP {code}")
+        print(f"B) without {name:28s} -> HTTP {code}")
 
     # minimum: only the essentials
-    minimo = {k: base[k] for k in (
+    minimum = {k: base[k] for k in (
         "accept", "authorization", "cookie", "referer", "user-agent",
         "x-goog-authuser", "x-origin", "x-referer", "x-browser-validation",
     ) if k in base}
-    code, body = curl(fresh(minimo), url)
+    code, body = curl(fresh(minimum), url)
     print(f"C) MINIMUM (9 headers)             -> HTTP {code}")
 
     # minimum + http1.1
-    escribe_privado("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redacta(fresh(minimo)).items()),
+    write_private("/tmp/abl.txt", "\n".join(f"{k}: {v}" for k, v in redact(fresh(minimum)).items()),
                                     encoding="utf-8")
     r = subprocess.run(["curl", "-sS", "--compressed", "--http1.1", "-o", "/tmp/abl_out.json",
                         "-w", "%{http_code}", "-H", "@/tmp/abl.txt", url],

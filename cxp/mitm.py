@@ -18,7 +18,7 @@ The proxy:
 1. accepts `CONNECT host:443`;
 2. opens the TLS tunnel against the real host (with MSS clamp);
 3. terminates the client's TLS with a local certificate;
-4. forwards peticiones/respuestas in HTTP/1.1;
+4. forwards requests/responses in HTTP/1.1;
 5. injects `Authorization: SAPISIDHASH ...` toward the console backend,
    computed with the `__Secure-3PSID` cookie that the browser itself sends (that
    cookie is HttpOnly: only the proxy can see it)."""
@@ -98,9 +98,9 @@ def _install_ca_in_trust_store(crt: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(crt.read_bytes())
         subprocess.run(["update-ca-certificates"], capture_output=True, timeout=120)
-        _log(f"CA instalada en el trust store: {target}")
+        _log(f"CA installed in the trust store: {target}")
     except Exception as exc:
-        _log(f"no se pudo instalar la CA en el trust store: {exc}")
+        _log(f"could not install the CA in the trust store: {exc}")
 
 
 def ensure_certificate(dirpath: Path, hosts: list[str]) -> tuple[Path, Path]:
@@ -391,11 +391,11 @@ class MitmProxy:
                         if data[:3] in (b"GET", b"POS", b"HEA", b"PUT", b"DEL"):
                             parts = data.split(b" ")
                             _log(f"-> {parts[0].decode(errors='replace')} {parts[1].decode(errors='replace')[:110]}")
-                            _log("   PETICION CRUDA:\n" + data[:1200].decode(errors="replace"))
+                            _log("   RAW REQUEST:\n" + data[:1200].decode(errors="replace"))
                     else:
                         if data.startswith(b"HTTP/"):
                             _log(f"<- {data.split(chr(13).encode())[0].decode(errors='replace')[:120]} ({len(data)} B)")
-                            _log("   RESPUESTA CRUDA:\n" + data[:1200].decode(errors="replace"))
+                            _log("   RAW RESPONSE:\n" + data[:1200].decode(errors="replace"))
                     counters[key] += len(data)
                     try:
                         dst.sendall(data)

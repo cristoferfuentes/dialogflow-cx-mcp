@@ -17,14 +17,14 @@ OK = 0
 FAIL = 0
 
 
-def check(nombre, cond, detalle=""):
+def check(name, cond, detail=""):
     global OK, FAIL
     if cond:
         OK += 1
-        print(f"  OK   {nombre}")
+        print(f"  OK   {name}")
     else:
         FAIL += 1
-        print(f"  FAIL {nombre} :: {detalle}")
+        print(f"  FAIL {name} :: {detail}")
 
 
 def main() -> int:
@@ -38,10 +38,10 @@ def main() -> int:
     print("\n== temporary resources ==")
     flow = cons.request("POST", cons._url(f"{ab}/agents/{agent}/flows"),
                         {"displayName": "zz_tmp_nuevas_" + str(int(time.time()) % 100000),
-                         "description": "temporal"})
+                         "description": "temporary"})
     flow_id = flow["name"].rsplit("/", 1)[-1]
     page = cons.request("POST", cons._url(f"{ab}/agents/{agent}/flows/{flow_id}/pages"),
-                        {"displayName": "Pagina probe",
+                        {"displayName": "Probe page",
                          "entryFulfillment": {"messages": [{"text": {"text": ["hola"]}}]}})
     page_name = page["name"]
     et = cons.request("POST", cons._url(f"{ab}/agents/{agent}/entityTypes"),
@@ -60,39 +60,39 @@ def main() -> int:
     grp_name = grp["name"]
 
     print("\n== cx_gaps (with the temporary resources already created) ==")
-    g = server.cx_gaps(agent=agent, project=project, incluir_paginas=True)
+    g = server.cx_gaps(agent=agent, project=project, include_pages=True)
     check("cx_gaps answers", "error" not in g, json.dumps(g)[:300])
-    campos = sorted({h["campo"] for h in g.get("huecos", [])})
-    print("   detected fields:", ", ".join(campos[:20]))
-    check("detects targetPlaybook", "targetPlaybook" in campos, str(campos))
-    check("detects dtmfPattern", "dtmfPattern" in campos, str(campos))
-    check("detects description (FormParameter)", "description" in campos, str(campos))
-    check("detects webClientSettings", "webClientSettings" in campos, str(campos))
+    fields = sorted({h.get("field") for h in (g.get("gaps") or [])})
+    print("   detected fields:", ", ".join(fields[:20]))
+    check("detects targetPlaybook", "targetPlaybook" in fields, str(fields))
+    check("detects dtmfPattern", "dtmfPattern" in fields, str(fields))
+    check("detects description (FormParameter)", "description" in fields, str(fields))
+    check("detects webClientSettings", "webClientSettings" in fields, str(fields))
 
     try:
         print("\n== cx_set_console_field (dry-run) ==")
-        d = server.cx_set_console_field(recurso=page_name, campo="speakerIdSettings",
-                                        valor={"enableSpeakerId": True}, dry_run=True,
-                                        agent=agent, project=project)
-        check("dry-run does not write", d.get("modo") == "dry-run", json.dumps(d)[:200])
-        check("dry-run returns the plan", "cambios" in d, json.dumps(d)[:200])
+        d = server.cx_set_console_field(resource=page_name, field="speakerIdSettings",
+                                         value={"enableSpeakerId": True}, dry_run=True,
+                                         agent=agent, project=project)
+        check("dry-run does not write", d.get("mode", d.get("modo")) == "dry-run", json.dumps(d)[:200])
+        check("dry-run returns the plan", "changes" in d or "cambios" in d, json.dumps(d)[:200])
 
         print("\n== cx_set_console_field: entities[0].dtmfPattern ==")
-        r = server.cx_set_console_field(recurso=et_name, campo="entities[0].dtmfPattern",
-                                        valor="9", dry_run=False, agent=agent,
-                                        project=project)
-        check("dtmfPattern written and verified", r.get("verificado") is True,
+        r = server.cx_set_console_field(resource=et_name, field="entities[0].dtmfPattern",
+                                         value="9", dry_run=False, agent=agent,
+                                         project=project)
+        check("dtmfPattern written and verified", r.get("verified", r.get("verificado")) is True,
               json.dumps(r)[:400])
 
         print("\n== cx_set_console_field: webClientSettings ==")
         agent_name = f"projects/{project}/locations/{cfg.location}/agents/{agent}"
         antes = cons.request("GET", cons._url("/" + agent_name))
         radio_antes = (antes.get("webClientSettings") or {}).get("boxBorderRadius")
-        r = server.cx_set_console_field(recurso=agent_name,
-                                        campo="webClientSettings.boxBorderRadius",
-                                        valor="8", dry_run=False, agent=agent,
-                                        project=project)
-        check("boxBorderRadius written and verified", r.get("verificado") is True,
+        r = server.cx_set_console_field(resource=agent_name,
+                                         field="webClientSettings.boxBorderRadius",
+                                         value="8", dry_run=False, agent=agent,
+                                         project=project)
+        check("boxBorderRadius written and verified", r.get("verified", r.get("verificado")) is True,
               json.dumps(r)[:400])
         # revert
         cons.patch_resource(agent_name,
@@ -107,18 +107,18 @@ def main() -> int:
                                                 route="true",
                                                 playbook=pbs[0].get("displayName", ""),
                                                 dry_run=True, project=project)
-        check("group: dry-run", g3.get("modo") == "dry-run", json.dumps(g3)[:300])
+        check("group: dry-run", g3.get("mode", g3.get("modo")) == "dry-run", json.dumps(g3)[:300])
         g4 = server.cx_set_group_route_playbook(agent=agent,
                                                 group=grp_name.rsplit("/", 1)[-1],
                                                 route="true",
                                                 playbook=pbs[0].get("displayName", ""),
                                                 dry_run=False, project=project)
-        check("group: written and verified", g4.get("verificado") is True,
+        check("group: written and verified", g4.get("verified", g4.get("verificado")) is True,
               json.dumps(g4)[:400])
         g5 = server.cx_set_group_route_playbook(agent=agent,
                                                 group=grp_name.rsplit("/", 1)[-1],
                                                 project=project)
-        check("group: read without route", g5.get("modo") == "lectura",
+        check("group: read without route", g5.get("mode", g5.get("modo")) == "read",
               json.dumps(g5)[:200])
     finally:
         for path in (f"{ab}/agents/{agent}/transitionRouteGroups/{grp_name.rsplit('/',1)[-1]}",

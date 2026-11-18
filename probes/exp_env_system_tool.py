@@ -17,7 +17,7 @@ name with another template...) and, if not, leaves a record.
 
 It creates all the temporary versions it needs, tests and **deletes everything**.
 
-    .venv/bin/python probes/exp_env_tool_sistema.py
+    .venv/bin/python probes/exp_env_system_tool.py
 """
 from __future__ import annotations
 
@@ -34,13 +34,13 @@ from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 
 
-def esperar(cons: ConsoleApi, op: dict, segundos: int = 180) -> dict:
-    nombre = op.get("name")
-    if not nombre or op.get("done") or "/operations/" not in nombre:
+def wait_for(cons: ConsoleApi, op: dict, seconds: int = 180) -> dict:
+    name = op.get("name")
+    if not name or op.get("done") or "/operations/" not in name:
         return op
-    for _ in range(segundos * 2):
+    for _ in range(seconds * 2):
         time.sleep(0.5)
-        op = cons.request("GET", cons._url("/" + nombre))
+        op = cons.request("GET", cons._url("/" + name))
         if op.get("done"):
             return op
     return op
@@ -48,16 +48,16 @@ def esperar(cons: ConsoleApi, op: dict, segundos: int = 180) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
-    base = f"/projects/{proyecto}/locations/{cfg.location}/agents/{agente}"
-    creados: list[str] = []
+    base = f"/projects/{project}/locations/{cfg.location}/agents/{agent}"
+    created: list[str] = []
 
     try:
         flows = cons.request("GET", cons._url(f"{base}/flows", pageSize="100"))
@@ -70,17 +70,17 @@ def main() -> int:
             if vs:
                 vcs.append({"version": vs[0]["name"]})
 
-        cola: set[str] = set()
+        queue: set[str] = set()
         for f in (flows.get("flows") or []):
             fid = f["name"].rsplit("/", 1)[-1]
             for pg in (cons.request("GET", cons._url(f"{base}/flows/{fid}/pages",
                                                      pageSize="100")).get("pages") or []):
                 for tr in (pg.get("transitionRoutes") or []):
                     if tr.get("targetPlaybook"):
-                        cola.add(tr["targetPlaybook"])
+                        queue.add(tr["targetPlaybook"])
         playbooks: set[str] = set()
-        while cola:
-            pb = cola.pop()
+        while queue:
+            pb = queue.pop()
             if pb in playbooks:
                 continue
             playbooks.add(pb)
@@ -90,7 +90,7 @@ def main() -> int:
                 continue
             for r in (d.get("referencedPlaybooks") or []):
                 if r:
-                    cola.add(r)
+                    queue.add(r)
         tools: set[str] = set()
         for pb in playbooks:
             try:
@@ -101,70 +101,70 @@ def main() -> int:
                 if r:
                     tools.add(r)
 
-        def version_de(nombre: str) -> str:
-            hijo = "playbookVersions" if "playbooks/" in nombre else "toolVersions"
+        def version_of(name: str) -> str:
+            child = "playbookVersions" if "playbooks/" in name else "toolVersions"
             try:
-                ex = cons.request("GET", cons._url(f"/{nombre}/versions",
-                                                   pageSize="5")).get(hijo) or []
+                ex = cons.request("GET", cons._url(f"/{name}/versions",
+                                                   pageSize="5")).get(child) or []
             except Exception:
                 return ""
             if ex:
                 return ex[0]["name"]
             try:
-                r = cons.request("POST", cons._url(f"/{nombre}/versions"),
-                                 body={"description": "temporal: barrido"})
+                r = cons.request("POST", cons._url(f"/{name}/versions"),
+                                 body={"description": "temporary: sweep"})
             except Exception:
                 return ""
             if r.get("name"):
-                creados.append(r["name"])
+                created.append(r["name"])
                 return r["name"]
             return ""
 
         for pb in sorted(playbooks):
-            v = version_de(pb)
+            v = version_of(pb)
             if v:
                 vcs.append({"version": v})
         for tl in sorted(tools):
-            v = version_de(tl)
+            v = version_of(tl)
             if v:
                 vcs.append({"version": v})
         print(f"versionConfigs ready: {len(vcs)} "
               f"({len(playbooks)} playbooks, {len(tools)} tools)")
 
-        prefijo = f"{base}/tools/df-code-interpreter-tool"
-        intentos = [
-            ("versions/1", f"{prefijo}/versions/1"),
-            ("versions/0", f"{prefijo}/versions/0"),
-            ("tool name", prefijo),
-            ("versions/latest", f"{prefijo}/versions/latest"),
+        prefix = f"{base}/tools/df-code-interpreter-tool"
+        attempts = [
+            ("versions/1", f"{prefix}/versions/1"),
+            ("versions/0", f"{prefix}/versions/0"),
+            ("tool name", prefix),
+            ("versions/latest", f"{prefix}/versions/latest"),
         ]
-        for etiqueta, valor in intentos:
-            cuerpo = {"displayName": f"zz_tmp_{uuid.uuid4().hex[:6]}",
-                      "description": "temporal",
-                      "versionConfigs": vcs + [{"version": valor}]}
+        for label, value in attempts:
+            body = {"displayName": f"zz_tmp_{uuid.uuid4().hex[:6]}",
+                      "description": "temporary",
+                      "versionConfigs": vcs + [{"version": value}]}
             try:
-                op = esperar(cons, cons.request(
-                    "POST", cons._url(f"{base}/environments"), body=cuerpo))
-                resp = op.get("response") or {}
-                nombre = resp.get("name") or ""
+                op = wait_for(cons, cons.request(
+                    "POST", cons._url(f"{base}/environments"), body=body))
+                response = op.get("response") or {}
+                name = response.get("name") or ""
             except Exception as exc:
-                nombre = ""
+                name = ""
                 err = str(exc)
             else:
                 err = json.dumps(op.get("error"), ensure_ascii=False)
-            if nombre:
-                print(f"  {etiqueta:<20} -> CREATED ({nombre})")
-                cons.request("DELETE", cons._url("/" + nombre))
+            if name:
+                print(f"  {label:<20} -> CREATED ({name})")
+                cons.request("DELETE", cons._url("/" + name))
                 print("      deleted")
                 break
-            print(f"  {etiqueta:<20} -> {err[:190]}")
+            print(f"  {label:<20} -> {err[:190]}")
     finally:
-        for nombre in creados:
+        for name in created:
             try:
-                cons.request("DELETE", cons._url("/" + nombre))
+                cons.request("DELETE", cons._url("/" + name))
             except Exception:
                 pass
-        print(f"{len(creados)} temporary versions deleted")
+        print(f"{len(created)} temporary versions deleted")
     return 0
 
 

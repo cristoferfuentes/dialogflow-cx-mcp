@@ -35,37 +35,37 @@ internal field with the MCP's own tool.
 
 | Field | Measured type | Catalogue | Live | |
 |---|---|---|---|---|
-| `QueryInput.alternativeLanguageCodes` | TYPE_STRING | solo_entrada | solo_entrada | ✅ |
-| `QueryInput.multiPartyTranscripts` | — | ignorado | ignorado | ✅ |
-| `QueryInput.partialTranscript` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.PartialTranscriptInput | no_aceptado | no_aceptado | ✅ |
-| `QueryInput.speechTranscripts` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.TranscriptInput | solo_entrada | solo_entrada | ✅ |
-| `QueryInput.tokenizedAudio` | — | ignorado | ignorado | ✅ |
-| `Webhook.cloudFunction` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.Webhook.CloudFunction | no_aceptado | no_aceptado | ✅ |
-| `Webhook.etag` | — | ignorado | ignorado | ✅ |
-| `Webhook.webhookFakeConfig` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.Webhook.WebhookFakeConfig | escribible | escribible | ✅ |
-| `EventHandler.condition` | TYPE_STRING | escribible | escribible | ✅ |
-| `EventHandler.enableNonConsecutiveTriggering` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsDtmfSettings.customRule` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsDtmfSettings.disableSpeechDetection` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsDtmfSettings.entityType` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsDtmfSettings.useSystemEntityRule` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsSpeechSettings.disableLlmEndpointing` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.disableTimeoutBasedEndpointing` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.enableAggressiveEndpointing` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.enableLlmEndpointing` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.enableSmartEndpointing` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.fallbackModels` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsSpeechSettings.fixTranscripts` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.geminiAsrConfig` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.InputAudioConfig.GeminiAsrConfig | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.minDigits` | TYPE_INT32 | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.overrideRequestSpeechModel` | — | ignorado | ignorado | ✅ |
-| `AdvancedSettingsSpeechSettings.useGeminiAsr` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.useSttV2` | TYPE_BOOL | escribible | escribible | ✅ |
-| `AdvancedSettingsSpeechSettings.utteranceWaitTimeout` | type.googleapis.com/google.protobuf.Duration | escribible | escribible | ✅ |
-| `ConversationTurnUserInput.parameterScope` | TYPE_STRING | escribible | escribible | ✅ |
-| `IntentTrainingPhrasePart.multiIntentIndicator` | — | ignorado | ignorado | ✅ |
-| `ConversationTurn.expectations` | — | ignorado | ignorado | ✅ |
-| `DtmfInput.transformed` | TYPE_BOOL | escribible | escribible | ✅ |
+| `QueryInput.alternativeLanguageCodes` | TYPE_STRING | input_only | input_only | ✅ |
+| `QueryInput.multiPartyTranscripts` | — | ignored | ignored | ✅ |
+| `QueryInput.partialTranscript` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.PartialTranscriptInput | not_accepted | not_accepted | ✅ |
+| `QueryInput.speechTranscripts` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.TranscriptInput | input_only | input_only | ✅ |
+| `QueryInput.tokenizedAudio` | — | ignored | ignored | ✅ |
+| `Webhook.cloudFunction` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.Webhook.CloudFunction | not_accepted | not_accepted | ✅ |
+| `Webhook.etag` | — | ignored | ignored | ✅ |
+| `Webhook.webhookFakeConfig` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.Webhook.WebhookFakeConfig | writable | writable | ✅ |
+| `EventHandler.condition` | TYPE_STRING | writable | writable | ✅ |
+| `EventHandler.enableNonConsecutiveTriggering` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsDtmfSettings.customRule` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsDtmfSettings.disableSpeechDetection` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsDtmfSettings.entityType` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsDtmfSettings.useSystemEntityRule` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsSpeechSettings.disableLlmEndpointing` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.disableTimeoutBasedEndpointing` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.enableAggressiveEndpointing` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.enableLlmEndpointing` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.enableSmartEndpointing` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.fallbackModels` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsSpeechSettings.fixTranscripts` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.geminiAsrConfig` | type.googleapis.com/google.cloud.dialogflow.cx.v3beta1.InputAudioConfig.GeminiAsrConfig | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.minDigits` | TYPE_INT32 | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.overrideRequestSpeechModel` | — | ignored | ignored | ✅ |
+| `AdvancedSettingsSpeechSettings.useGeminiAsr` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.useSttV2` | TYPE_BOOL | writable | writable | ✅ |
+| `AdvancedSettingsSpeechSettings.utteranceWaitTimeout` | type.googleapis.com/google.protobuf.Duration | writable | writable | ✅ |
+| `ConversationTurnUserInput.parameterScope` | TYPE_STRING | writable | writable | ✅ |
+| `IntentTrainingPhrasePart.multiIntentIndicator` | — | ignored | ignored | ✅ |
+| `ConversationTurn.expectations` | — | ignored | ignored | ✅ |
+| `DtmfInput.transformed` | TYPE_BOOL | writable | writable | ✅ |
 
 ## 6. Real write of an internal field (`cx_set_console_field`)
 
@@ -85,5 +85,5 @@ internal field with the MCP's own tool.
 
 _(end of the verification, 11:50:13)_
 
-> Reproduce it yourself: `python probes/verificacion_final.py` (it needs credentials
+> Reproduce it yourself: `python probes/final_verification.py` (it needs credentials
 > and a writable agent of your own).

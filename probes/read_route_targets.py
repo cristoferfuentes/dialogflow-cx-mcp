@@ -18,12 +18,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 
 FRAME_URL = (
     "https://conversational-agents.cloud.google.com/cx/projects/{p}/locations/{l}/agents/{a}"
@@ -35,11 +35,11 @@ JS_LEER = """
   const target = document.querySelector('df-transition-target');
   if (!target) return {error: 'no df-transition-target (editor not open)'};
   const radio = target.querySelector('mat-radio-button.mat-mdc-radio-checked');
-  const tipo = radio ? radio.getAttribute('value') : null;
+  const type = radio ? radio.getAttribute('value') : null;
   const sel = target.querySelector('span.mat-mdc-select-min-line');
-  const destino = sel ? sel.innerText.trim() : null;
+  const destination = sel ? sel.innerText.trim() : null;
   const cond = document.querySelector('transition_routes');
-  return {tipo, destino};
+  return {type, destination};
 }
 """
 
@@ -79,19 +79,19 @@ def main() -> int:
 
     out: list[dict] = []
     for i in range(n):
-        cond = (cards.nth(i).inner_text() or "").strip()
+        condition = (cards.nth(i).inner_text() or "").strip()
         try:
             cards.nth(i).click(timeout=15_000)
         except Exception as exc:
-            out.append({"indice": i, "condicion": cond, "error": f"click: {exc}"})
+            out.append({"index": i, "condition": condition, "error": f"click: {exc}"})
             continue
         time.sleep(1.6)
         try:
             data = page.evaluate(JS_LEER)
         except Exception as exc:
             data = {"error": str(exc)}
-        out.append({"indice": i, "condicion": cond, **data})
-        print(f"   [{i}] {cond[:60]:62s} -> {data.get('tipo')} / {data.get('destino')}", flush=True)
+        out.append({"index": i, "condition": condition, **data})
+        print(f"   [{i}] {condition[:60]:62s} -> {data.get('type')} / {data.get('destination')}", flush=True)
 
     print(f"\n== {len(out)} routes read", flush=True)
     if args.out:

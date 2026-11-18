@@ -1,15 +1,15 @@
-# Credenciales y estado de sesion
+# Credentials and session state
 .env
 .session-state.json
 
-# Perfiles de navegador (los usa el helper de login)
+# Browser profiles (used by the login helper)
 .browser-profile/
 .browser-profile-*/
 
-# Certificado del proxy local (lo usa el MITM de las sondas)
+# Local proxy certificate (used by the MITM of the probes)
 .proxy-cert/
 
-# Discovery doc cacheado (se descarga solo)
+# Cached discovery doc (downloaded on its own)
 .discovery/
 
 # Python
@@ -24,7 +24,7 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
-# Editores / SO
+# Editors / OS
 .idea/
 .vscode/
 .DS_Store

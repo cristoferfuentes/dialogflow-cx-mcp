@@ -24,9 +24,9 @@ returns the conversation WITHOUT `interactions` (metadata only).
 
 USAGE
 ---
-    .venv/bin/python probes/exp_logs_conversaciones.py \
-        --agente 22222222-2222-4222-8222-222222222222 \
-        --proyecto my-project \
+    .venv/bin/python probes/exp_conversation_logs.py \
+        --agent 22222222-2222-4222-8222-222222222222 \
+        --project my-project \
         --session 176789778-1794838739362-58e90084de99ffa8 ... \
         --out ./logs-conversaciones
 """
@@ -40,7 +40,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -50,22 +50,22 @@ from cxp.console_api import ConsoleApi
 
 
 # Extracts the agent text from a list of `responseMessages`.
-def texto_agente(mensajes: Any) -> str:
-    if not isinstance(mensajes, list):
+def agent_text(messages: Any) -> str:
+    if not isinstance(messages, list):
         return ""
-    partes: list[str] = []
-    for m in mensajes:
+    parts: list[str] = []
+    for m in messages:
         if not isinstance(m, dict):
             continue
         t = m.get("text")
         if isinstance(t, dict):
             for txt in (t.get("text") or []):
                 if isinstance(txt, str) and txt.strip():
-                    partes.append(txt)
-    return "\n\n".join(partes)
+                    parts.append(txt)
+    return "\n\n".join(parts)
 
 
-def texto_usuario(qi: Any) -> str:
+def user_text(qi: Any) -> str:
     """The user text comes from `request.queryInput` (several possible places)."""
     if not isinstance(qi, dict):
         return ""
@@ -85,19 +85,19 @@ def _safe(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", s)[:80]
 
 
-def payloads_agente(mensajes: Any) -> list[dict[str, Any]]:
+def agent_payloads(messages: Any) -> list[dict[str, Any]]:
     """The `responseMessages` with a `payload` (buttons, carousel, greeting...)."""
-    if not isinstance(mensajes, list):
+    if not isinstance(messages, list):
         return []
     out: list[dict[str, Any]] = []
-    for m in mensajes:
+    for m in messages:
         if isinstance(m, dict) and m.get("payload"):
             out.append({"responseType": m.get("responseType"),
                         "payload": m["payload"]})
     return out
 
 
-def resumen_traza(trace_blocks: Any) -> list[dict[str, Any]]:
+def trace_summary(trace_blocks: Any) -> list[dict[str, Any]]:
     """Summary of `traceBlocks`: which flow/page/intent were traversed."""
     if not isinstance(trace_blocks, list):
         return []
@@ -106,15 +106,15 @@ def resumen_traza(trace_blocks: Any) -> list[dict[str, Any]]:
         if not isinstance(tb, dict):
             continue
         meta = tb.get("flowTraceMetadata") or {}
-        fila: dict[str, Any] = {
+        row: dict[str, Any] = {
             "flow": (meta.get("displayName") or ""),
             "flowId": (meta.get("flow") or "").split("/")[-1],
         }
-        pasos: list[str] = []
+        steps: list[str] = []
         for acc in (tb.get("actions") or []):
             if not isinstance(acc, dict):
                 continue
-            etiqueta = acc.get("displayName")
+            label = acc.get("displayName")
             extra: dict[str, Any] = {}
             im = acc.get("intentMatch")
             if isinstance(im, dict):
@@ -131,17 +131,17 @@ def resumen_traza(trace_blocks: Any) -> list[dict[str, Any]]:
                 extra["userUtterance"] = (acc["userUtterance"] or {}).get("text")
             if acc.get("agentUtterance"):
                 extra["agentUtterance"] = (acc["agentUtterance"] or {}).get("text")
-            pasos.append({"paso": etiqueta,
+            steps.append({"step": label,
                           "startTime": acc.get("startTime"),
                           "completeTime": acc.get("completeTime"),
                           **extra})
-        if pasos:
-            fila["pasos"] = pasos
-        out.append(fila)
+        if steps:
+            row["steps"] = steps
+        out.append(row)
     return out
 
 
-def linea_turno(idx: int, it: dict) -> dict[str, Any]:
+def turn_line(idx: int, it: dict) -> dict[str, Any]:
     req = it.get("request") or {}
     resp = it.get("response") or {}
     qr = resp.get("queryResult") or {}
@@ -154,9 +154,9 @@ def linea_turno(idx: int, it: dict) -> dict[str, Any]:
     return {
         "n": idx,
         "createTime": it.get("createTime"),
-        "usuario": texto_usuario(req.get("queryInput")),
-        "agente": texto_agente(qr.get("responseMessages")) or (qr.get("text") or ""),
-        "payloads": payloads_agente(qr.get("responseMessages")),
+        "user": user_text(req.get("queryInput")),
+        "agent": agent_text(qr.get("responseMessages")) or (qr.get("text") or ""),
+        "payloads": agent_payloads(qr.get("responseMessages")),
         "matchType": match.get("matchType"),
         "intent": intent.get("displayName"),
         "confidence": match.get("confidence"),
@@ -165,8 +165,8 @@ def linea_turno(idx: int, it: dict) -> dict[str, Any]:
                       (gen.get("currentPlaybooks") or []) if pb],
         "parameters": {k: v for k, v in params.items()
                        if isinstance(v, (str, int, float, bool))},
-        "latencias": lat,
-        "traza": resumen_traza(qr.get("traceBlocks")),
+        "latencies": lat,
+        "trace": trace_summary(qr.get("traceBlocks")),
         "missingTransition": it.get("missingTransition"),
         "answerFeedback": it.get("answerFeedback") or {},
     }
@@ -174,48 +174,48 @@ def linea_turno(idx: int, it: dict) -> dict[str, Any]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
     ap.add_argument("--location", default="")
     ap.add_argument("--session", action="append", default=[],
                     help="conversation ID (repeatable)")
     ap.add_argument("--out", default=os.environ.get(
-        "CXP_LOGS_DIR", str(RAIZ / "logs-conversaciones")))
+        "CXP_LOGS_DIR", str(ROOT / "logs-conversaciones")))
     args = ap.parse_args()
 
     cfg = load_config()
-    proyecto = args.proyecto or cfg.project
+    project = args.project or cfg.project
     location = args.location or cfg.location
-    agente = args.agente or cfg.only_agent()
+    agent = args.agent or cfg.only_agent()
     cons = ConsoleApi(cfg)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    base = f"/projects/{proyecto}/locations/{location}/agents/{agente}"
-    resumen: list[dict[str, Any]] = []
+    base = f"/projects/{project}/locations/{location}/agents/{agent}"
+    summary: list[dict[str, Any]] = []
 
     for sid in args.session:
-        reg: dict[str, Any] = {"session_id": sid, "agente": agente,
-                               "proyecto": proyecto, "location": location}
+        reg: dict[str, Any] = {"session_id": sid, "agent": agent,
+                               "project": project, "location": location}
         try:
             conv = cons.request("GET", cons._url(f"{base}/conversations/{sid}"))
         except Exception as exc:
-            reg["estado"] = "error"
-            reg["detalle"] = str(exc)[:300]
+            reg["status"] = "error"
+            reg["detail"] = str(exc)[:300]
             print(f"ERROR {sid}: {str(exc)[:160]}")
-            resumen.append(reg)
+            summary.append(reg)
             continue
 
-        reg["estado"] = "ok"
+        reg["status"] = "ok"
         reg["startTime"] = conv.get("startTime")
         reg["duration"] = conv.get("duration")
         reg["type"] = conv.get("type")
         reg["languageCode"] = conv.get("languageCode")
         reg["metrics"] = conv.get("metrics")
         reg["flows"] = [f.get("name", "").split("/")[-1] for f in (conv.get("flows") or [])]
-        interacciones = conv.get("interactions") or []
-        reg["turnos"] = [linea_turno(i, it) for i, it in enumerate(interacciones)]
-        reg["interacciones_brutas"] = len(interacciones)
+        interactions = conv.get("interactions") or []
+        reg["turns"] = [turn_line(i, it) for i, it in enumerate(interactions)]
+        reg["raw_interactions"] = len(interactions)
 
         # (1) full raw JSON
         (out / f"{_safe(sid)}.json").write_text(
@@ -224,7 +224,7 @@ def main() -> int:
         # (2) readable Markdown
         md: list[str] = []
         md.append(f"# Conversation {sid}\n")
-        md.append(f"- **Agent**: `{agente}` (project `{proyecto}`, "
+        md.append(f"- **Agent**: `{agent}` (project `{project}`, "
                   f"location `{location}`)")
         md.append(f"- **Start**: {reg['startTime']}")
         md.append(f"- **Duration**: {reg['duration']}  |  **Type**: {reg['type']}  "
@@ -244,17 +244,17 @@ def main() -> int:
                 md.append(f"  - By match type: {json.dumps(mt, ensure_ascii=False)}")
         md.append("\n---\n")
 
-        for t in reg["turnos"]:
+        for t in reg["turns"]:
             md.append(f"## Turn {t['n']}  ({t.get('createTime')})\n")
-            md.append(f"**User**: {t['usuario'] or '_(no text)_'}\n")
-            md.append(f"**Agent**: {t['agente'] or '_(no text response)_'}\n")
+            md.append(f"**User**: {t['user'] or '_(no text)_'}\n")
+            md.append(f"**Agent**: {t['agent'] or '_(no text response)_'}\n")
             md.append(f"- Match: `{t.get('matchType')}` | Intent: "
                       f"`{t.get('intent')}` | confidence: {t.get('confidence')}")
             if t.get("playbooks"):
                 md.append(f"- Playbooks: {', '.join(t['playbooks'])}")
-            if t.get("latencias"):
+            if t.get("latencies"):
                 md.append("- Latencies: "
-                          + ", ".join(f"{k}={v}" for k, v in t["latencias"].items()))
+                          + ", ".join(f"{k}={v}" for k, v in t["latencies"].items()))
             if t.get("missingTransition"):
                 md.append(f"- **missingTransition**: "
                           f"`{json.dumps(t['missingTransition'], ensure_ascii=False)[:300]}`")
@@ -270,12 +270,12 @@ def main() -> int:
                               f"`{json.dumps(pl['payload'], ensure_ascii=False)}`")
                 md.append("")
 
-            if t.get("traza"):
+            if t.get("trace"):
                 md.append("### Conversation trace\n")
-                for fb in t["traza"]:
+                for fb in t["trace"]:
                     md.append(f"**Flow**: {fb.get('flow')} (`{fb.get('flowId')}`)\n")
-                    for p in fb.get("pasos", []):
-                        md.append(f"- `{p.get('paso')}`")
+                    for p in fb.get("steps", []):
+                        md.append(f"- `{p.get('step')}`")
                         if p.get("eventType"):
                             md.append(f" — event `{p['eventType']}`")
                         if p.get("page"):
@@ -298,16 +298,16 @@ def main() -> int:
                 md.append("```\n")
         (out / f"{_safe(sid)}.md").write_text("\n".join(md), encoding="utf-8")
 
-        print(f"OK {sid}: {len(interacciones)} interactions -> "
+        print(f"OK {sid}: {len(interactions)} interactions -> "
               f"{_safe(sid)}.json / .md")
-        resumen.append(reg)
+        summary.append(reg)
 
     (out / "resumen.json").write_text(
-        json.dumps(resumen, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Readable index of all the conversations
     idx_md: list[str] = ["# Conversation logs — Dialogflow CX (via API)\n"]
-    idx_md.append(f"- **Agent**: `{agente}`  |  **Project**: `{proyecto}`  |  "
+    idx_md.append(f"- **Agent**: `{agent}`  |  **Project**: `{project}`  |  "
                   f"**Location**: `{location}`")
     idx_md.append(f"- **Origin**: `GET {cons.cfg.console_backend}/"
                   f"{cons.cfg.api_version}/projects/.../agents/.../conversations/{{id}}` "
@@ -315,23 +315,23 @@ def main() -> int:
     idx_md.append(f"- **Generated**: {datetime.now(timezone.utc).isoformat()}")
     idx_md.append("| # | Session ID | Start | Duration | Turns | Avg. confidence | File |")
     idx_md.append("|---|---|---|---|---|---|---|")
-    for n, r in enumerate(resumen, 1):
-        if r.get("estado") != "ok":
+    for n, r in enumerate(summary, 1):
+        if r.get("status") != "ok":
             idx_md.append(f"| {n} | `{r['session_id']}` | - | - | ERROR | - | - |")
             continue
         m = r.get("metrics") or {}
         idx_md.append(
             f"| {n} | `{r['session_id']}` | {r.get('startTime')} | {r.get('duration')} | "
-            f"{r.get('interacciones_brutas')} | {m.get('averageMatchConfidence')} | "
+            f"{r.get('raw_interactions')} | {m.get('averageMatchConfidence')} | "
             f"[md]({_safe(r['session_id'])}.md) / [json]({_safe(r['session_id'])}.json) |")
     idx_md.append("\n---\n")
-    for n, r in enumerate(resumen, 1):
-        if r.get("estado") != "ok":
+    for n, r in enumerate(summary, 1):
+        if r.get("status") != "ok":
             continue
         idx_md.append(f"## {n}. `{r['session_id']}`\n")
         for t in r.get("turnos", []):
-            u = (t.get("usuario") or "").replace("\n", " ")[:160]
-            a = (t.get("agente") or "").replace("\n", " ")[:220]
+            u = (t.get("user") or "").replace("\n", " ")[:160]
+            a = (t.get("agent") or "").replace("\n", " ")[:220]
             idx_md.append(f"- **Turn {t['n']}** — user: *{u}*")
             idx_md.append(f"  - agent: {a}")
             idx_md.append(f"  - match `{t.get('matchType')}` / intent "

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Smoke test del MCP: llama a las herramientas de verdad, por el protocolo MCP.
+"""Smoke test of the MCP: it calls the real tools, over the MCP protocol.
 
-Es **generico**: no hay ningun agente, flow, pagina ni playbook cableado. Todo
-se descubre en los agentes de la lista blanca del `.env` (`CXP_AGENT_READ` /
-`CXP_AGENT_READWRITE`), y lo que se escribe se hace sobre recursos
-**TEMPORALES** que se borran al final.
+It is **generic**: there is no agent, flow, page or playbook hard-wired. Everything
+is discovered in the agents of the allowlist of the `.env` (`CXP_AGENT_READ` /
+`CXP_AGENT_READWRITE`), and what is written is done on **TEMPORARY** resources
+that are deleted at the end.
 
-    python smoke_test.py            # usa el agente con escritura de la lista blanca
+    python smoke_test.py            # uses the writable agent of the allowlist
     CXP_AGENT_READWRITE=<uuid> python smoke_test.py
 
-REGLA DURA: solo se escribe en un agente de `CXP_AGENT_READWRITE` (nuestra
-copia). Nunca en un agente de referencia: se romperia la paridad con la
-consola.
+HARD RULE: it only writes on an agent of `CXP_AGENT_READWRITE` (our
+copy). Never on a reference agent: that would break the parity with the
+console.
 """
 from __future__ import annotations
 
@@ -32,10 +32,10 @@ SERVER = str(HERE / "server.py")
 FAIL: list[str] = []
 
 
-def check(nombre: str, ok: bool, detalle: str = "") -> None:
-    print(f"   [{'OK ' if ok else 'FALLO'}] {nombre}" + (f" -- {detalle}" if detalle else ""))
+def check(name: str, ok: bool, detail: str = "") -> None:
+    print(f"   [{'OK ' if ok else 'FAIL'}] {name}" + (f" -- {detail}" if detail else ""))
     if not ok:
-        FAIL.append(nombre)
+        FAIL.append(name)
 
 
 def _first(res):
@@ -50,8 +50,8 @@ def _first(res):
 
 
 async def main() -> int:
-    # El SDK de MCP NO hereda el entorno del padre (usa un subconjunto seguro),
-    # asi que hay que pasarlo explicito.
+    # The MCP SDK does NOT inherit the environment of the parent (it uses a safe
+    # subset), so it has to be passed explicitly.
     env = dict(os.environ)
     params = StdioServerParameters(command=PY, args=[SERVER], env=env)
 
@@ -59,258 +59,258 @@ async def main() -> int:
         async with ClientSession(read, write) as session:
             init = await session.initialize()
             info = getattr(init, "serverInfo", None) or getattr(init, "server_info", None)
-            print(f"== servidor: {getattr(info, 'name', '?')}")
+            print(f"== server: {getattr(info, 'name', '?')}")
             tools = await session.list_tools()
-            nombres = {t.name for t in tools.tools}
-            print(f"== herramientas ({len(nombres)}): {', '.join(sorted(nombres))}")
-            for esperadas in ("cx_gaps", "cx_set_console_field",
-                              "cx_set_group_route_playbook", "cx_set_route_playbook",
-                              "cx_set_flow_route_playbook", "cx_limites_api"):
-                check(f"existe la herramienta {esperadas}", esperadas in nombres)
+            names = {t.name for t in tools.tools}
+            print(f"== tools ({len(names)}): {', '.join(sorted(names))}")
+            for expected in ("cx_gaps", "cx_set_console_field",
+                             "cx_set_group_route_playbook", "cx_set_route_playbook",
+                             "cx_set_flow_route_playbook", "cx_limites_api"):
+                check(f"the tool {expected} exists", expected in names)
 
             # ---------------------------------------------------------- status
             print("\n== cx_status ==")
             st = _first(await session.call_tool("cx_status", {}))
-            check("credenciales_ok", st.get("credenciales_ok") is True)
-            check("sesion_aceptada", st.get("sesion_aceptada") is True)
+            check("credentials_ok", st.get("credentials_ok") is True)
+            check("session_accepted", st.get("session_accepted") is True)
             check("api_version v3beta1", st.get("api_version") == "v3beta1")
-            check("tabla de permisos", len(st.get("permisos") or []) >= 1,
-                  f"n={len(st.get('permisos') or [])}")
+            check("permission table", len(st.get("permissions") or []) >= 1,
+                  f"n={len(st.get('permissions') or [])}")
 
             # The agents of the allowlist (the MCP has no default agent):
             # one to READ and one to WRITE. They may live in different
             # projects, so each one carries its own.
-            visibles = st.get("agentes_visibles") or []
-            con_escritura = st.get("agentes_con_escritura") or []
-            permisos = st.get("permisos") or []
+            visible = st.get("visible_agents") or []
+            writable = st.get("writable_agents") or []
+            permissions = st.get("permissions") or []
 
             def _id(a):
                 return a.get("id", "") if isinstance(a, dict) else str(a)
 
-            agente = _id(visibles[0]) if visibles else ""
-            agente_escritura = _id(con_escritura[0]) if con_escritura else ""
-            if not agente and not agente_escritura:
+            agent = _id(visible[0]) if visible else ""
+            write_agent = _id(writable[0]) if writable else ""
+            if not agent and not write_agent:
                 print("   no allowed agent: put one in CXP_AGENT_READ or "
                       "CXP_AGENT_READWRITE")
                 return 1
             # The project of the writable agent, when the allowlist declares it
             # ('<project>/<uuid>').
-            proyecto = st.get("proyecto") or ""
-            for p_ in permisos:
-                if p_.get("agente") == agente_escritura and \
-                        p_.get("proyecto") not in (None, "", "(cualquiera)"):
-                    proyecto = p_["proyecto"]
-            print(f"   agente (lectura): {agente}")
-            print(f"   agente (escritura): {agente_escritura} | proyecto: {proyecto}")
+            project = st.get("project") or ""
+            for p_ in permissions:
+                if p_.get("agent") == write_agent and \
+                        p_.get("project") not in (None, "", "(any)"):
+                    project = p_["project"]
+            print(f"   agent (read): {agent}")
+            print(f"   agent (write): {write_agent} | project: {project}")
             # Does the writable agent really exist? An allowlist entry can
             # point to an agent that is not there any more.
-            comprobados = {f.get("agente"): f for f in (st.get("agentes_comprobados") or [])}
-            if not agente_escritura:
-                print("   no hay agente con escritura: se saltan las pruebas de escritura")
+            checked = {f.get("agent"): f for f in (st.get("checked_agents") or [])}
+            if not write_agent:
+                print("   no writable agent: the write tests are skipped")
                 return 0
-            if not (comprobados.get(agente_escritura) or {}).get("accesible"):
+            if not (checked.get(write_agent) or {}).get("accessible"):
                 # The allowlist points to an agent that is not there: it is a
                 # configuration problem, not a failure of the MCP.
-                print(f"   AVISO: el agente con escritura {agente_escritura} no existe "
-                      f"(404): revisa CXP_AGENT_READWRITE (el MCP lo comprueba con "
-                      f"un GET real). Se saltan las pruebas de escritura.")
+                print(f"   WARNING: the writable agent {write_agent} does not exist "
+                      f"(404): check CXP_AGENT_READWRITE (the MCP checks it with "
+                      f"a real GET). The write tests are skipped.")
                 return 0
 
             # -------------------------------------------------------- discover
             print("\n== cx_discover ==")
             d = _first(await session.call_tool("cx_discover", {}))
-            check("el mapa de la API tiene metodos", (d.get("total_metodos") or 0) > 100,
-                  f"total={d.get('total_metodos')}")
+            check("the API map has methods", (d.get("total_methods") or 0) > 100,
+                  f"total={d.get('total_methods')}")
             det = _first(await session.call_tool("cx_discover",
                                                  {"method": "agents.flows.train"}))
-            check("detalle de un metodo", det.get("metodo", {}).get("http") == "POST")
+            check("detail of one method", det.get("method", {}).get("http") == "POST")
 
-            # --------------------------------------------------------- lecturas
-            print("\n== lecturas ==")
-            ga = _first(await session.call_tool("cx_get_agent", {"agent": agente}))
-            check("GET agent", str(ga.get("datos", {}).get("name", "")).endswith(agente),
+            # --------------------------------------------------------- reads
+            print("\n== reads ==")
+            ga = _first(await session.call_tool("cx_get_agent", {"agent": agent}))
+            check("GET agent", str(ga.get("data", {}).get("name", "")).endswith(agent),
                   str(ga.get("error") or "")[:120])
-            fl = _first(await session.call_tool("cx_list_flows", {"agent": agente}))
+            fl = _first(await session.call_tool("cx_list_flows", {"agent": agent}))
             flows = fl.get("flows") or []
-            check("el agente tiene flows", len(flows) > 0, f"n={len(flows)}")
-            pb = _first(await session.call_tool("cx_list_playbooks", {"agent": agente}))
+            check("the agent has flows", len(flows) > 0, f"n={len(flows)}")
+            pb = _first(await session.call_tool("cx_list_playbooks", {"agent": agent}))
             playbooks = pb.get("playbooks") or []
-            check("el agente tiene playbooks", len(playbooks) > 0, f"n={len(playbooks)}")
+            check("the agent has playbooks", len(playbooks) > 0, f"n={len(playbooks)}")
             if not playbooks:
-                print("   sin playbooks: se saltan las pruebas de destino a playbook")
+                print("   no playbooks: the playbook-target tests are skipped")
                 return 1
-            pb_nombre = playbooks[0].get("displayName") or playbooks[0].get("name")
+            pb_name = playbooks[0].get("displayName") or playbooks[0].get("name")
             pb_id = (playbooks[0].get("id")
                      or (playbooks[0].get("name") or "").rsplit("/", 1)[-1])
 
-            # --------------------------------------------------------- huecos
-            print("\n== cx_gaps (los huecos de la API publica) ==")
-            g = _first(await session.call_tool("cx_gaps", {"agent": agente,
-                                                           "incluir_paginas": False}))
-            check("cx_gaps responde", "error" not in g, str(g.get("error"))[:150])
-            check("cx_gaps detecta huecos", (g.get("total_huecos") or 0) > 0,
-                  f"total={g.get('total_huecos')}")
-            check("cx_gaps trae el catalogo medido",
-                  len(g.get("catalogo") or []) > 0)
-            campos = {h.get("campo") for h in (g.get("huecos") or [])}
-            check("detecta un campo fuera de esquema", len(campos) > 0,
-                  ", ".join(sorted(c for c in campos if c)[:8]))
-            g2 = _first(await session.call_tool("cx_gaps", {"agent": agente,
+            # --------------------------------------------------------- gaps
+            print("\n== cx_gaps (the gaps of the public API) ==")
+            g = _first(await session.call_tool("cx_gaps", {"agent": agent,
+                                                           "include_pages": False}))
+            check("cx_gaps answers", "error" not in g, str(g.get("error"))[:150])
+            check("cx_gaps detects gaps", (g.get("total_gaps") or 0) > 0,
+                  f"total={g.get('total_gaps')}")
+            check("cx_gaps brings the measured catalogue",
+                  len(g.get("catalogue") or []) > 0)
+            fields = {h.get("field") for h in (g.get("gaps") or [])}
+            check("it detects a field outside the schema", len(fields) > 0,
+                  ", ".join(sorted(c for c in fields if c)[:8]))
+            g2 = _first(await session.call_tool("cx_gaps", {"agent": agent,
                                                             "scope": "Tool",
-                                                            "incluir_paginas": False}))
-            check("cx_gaps filtra por scope", "error" not in g2, str(g2)[:120])
-            cob = g.get("cobertura") or {}
-            check("cx_gaps dice la cobertura",
-                  (cob.get("colecciones_del_descriptor") or 0) > 0
-                  and (cob.get("colecciones_alcanzadas") or 0) > 0,
+                                                            "include_pages": False}))
+            check("cx_gaps filters by scope", "error" not in g2, str(g2)[:120])
+            cob = g.get("coverage") or {}
+            check("cx_gaps reports the coverage",
+                  (cob.get("descriptor_collections") or 0) > 0
+                  and (cob.get("reachable_collections") or 0) > 0,
                   str(cob))
-            check("cx_gaps trae los huecos de METODO",
-                  len(g.get("huecos_de_metodo") or []) > 0)
+            check("cx_gaps brings the METHOD gaps",
+                  len(g.get("method_gaps") or []) > 0)
 
-            # ------------------------------------------- huecos de METODO
-            print("\n== cx_endpoints_consola (endpoints fuera del descriptor) ==")
+            # ------------------------------------------- method gaps
+            print("\n== cx_endpoints_consola (endpoints outside the descriptor) ==")
             ec = _first(await session.call_tool("cx_endpoints_consola", {}))
-            check("cx_endpoints_consola devuelve el catalogo",
+            check("cx_endpoints_consola returns the catalogue",
                   (ec.get("total") or 0) >= 8, f"n={ec.get('total')}")
             sys_types = _first(await session.call_tool("cx_endpoints_consola",
                                                        {"endpoint": "systemEntityTypes.list"}))
-            check("llama a un endpoint fuera del descriptor",
-                  sys_types.get("estado") == "ok"
-                  and bool((sys_types.get("datos") or {}).get("systemEntityTypes")),
+            check("it calls an endpoint outside the descriptor",
+                  sys_types.get("status") == "ok"
+                  and bool((sys_types.get("data") or {}).get("systemEntityTypes")),
                   str(sys_types.get("error"))[:150])
 
-            # ------------------------------- cx_api con version y rutas absolutas
-            print("\n== cx_api: version y rutas absolutas ==")
+            # ------------------------------- cx_api with version and absolute routes
+            print("\n== cx_api: version and absolute routes ==")
             v3a = _first(await session.call_tool("cx_api", {
                 "method": "GET",
                 "path": "projects/{project}/locations/{location}/agents/{agent}/currentUsers",
-                "params": {"project": st.get("proyecto"), "location": st.get("location"),
-                           "agent": agente},
+                "params": {"project": st.get("project"), "location": st.get("location"),
+                           "agent": agent},
                 "version": "v3alpha1"}))
-            check("cx_api alcanza un endpoint de v3alpha1",
-                  "error" not in v3a and bool((v3a.get("datos") or {}).get("currentUsers")),
+            check("cx_api reaches a v3alpha1 endpoint",
+                  "error" not in v3a and bool((v3a.get("data") or {}).get("currentUsers")),
                   str(v3a.get("error"))[:150])
-            raiz = _first(await session.call_tool("cx_api", {
+            root = _first(await session.call_tool("cx_api", {
                 "method": "GET", "path": "/users/me/userSettings/recentProjects",
                 "version": "v3alpha1"}))
-            check("cx_api alcanza una ruta ABSOLUTA desde la raiz",
-                  "error" not in raiz and bool((raiz.get("datos") or {}).get("projects")),
-                  str(raiz.get("error"))[:150])
+            check("cx_api reaches an ABSOLUTE route from the root",
+                  "error" not in root and bool((root.get("data") or {}).get("projects")),
+                  str(root.get("error"))[:150])
 
-            # ------------------------------------------------- recursos temporales
-            print("\n== recursos temporales ==")
-            marca = str(int(time.time()) % 100000)
+            # ------------------------------------------------- temporary resources
+            print("\n== temporary resources ==")
+            mark = str(int(time.time()) % 100000)
             flow = _first(await session.call_tool("cx_api", {
                 "method": "POST", "path": "agents/{agent}/flows",
-                "agent": agente_escritura, "project": proyecto,
-                "body": {"displayName": f"zz_tmp_smoke_{marca}", "description": "temporal"}}))
-            flow_id = (flow.get("datos") or {}).get("name", "").rsplit("/", 1)[-1]
-            check("flow temporal creado", bool(flow_id), str(flow.get("error"))[:120])
+                "agent": write_agent, "project": project,
+                "body": {"displayName": f"zz_tmp_smoke_{mark}", "description": "temporary"}}))
+            flow_id = (flow.get("data") or {}).get("name", "").rsplit("/", 1)[-1]
+            check("temporary flow created", bool(flow_id), str(flow.get("error"))[:120])
             if not flow_id:
                 return 1
 
             try:
                 pg = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/flows/{flow}/pages",
-                    "agent": agente_escritura, "project": proyecto,
+                    "agent": write_agent, "project": project,
                     "params": {"flow": flow_id},
-                    "body": {"displayName": "Pagina smoke",
+                    "body": {"displayName": "Smoke page",
                              "entryFulfillment": {"messages": [
-                                 {"text": {"text": ["hola"]}}]}}}))
-                page_name = (pg.get("datos") or {}).get("name", "")
-                check("pagina temporal creada", bool(page_name), str(pg.get("error"))[:160])
+                                 {"text": {"text": ["hello"]}}]}}}))
+                page_name = (pg.get("data") or {}).get("name", "")
+                check("temporary page created", bool(page_name), str(pg.get("error"))[:160])
 
                 et = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/entityTypes",
-                    "agent": agente_escritura, "project": proyecto,
-                    "body": {"displayName": f"zz_tmp_smoke_et_{marca}", "kind": "KIND_MAP",
-                             "entities": [{"value": "uno", "synonyms": ["uno"]}]}}))
-                et_name = (et.get("datos") or {}).get("name", "")
-                check("entityType temporal creado", bool(et_name), str(et.get("error"))[:160])
+                    "agent": write_agent, "project": project,
+                    "body": {"displayName": f"zz_tmp_smoke_et_{mark}", "kind": "KIND_MAP",
+                             "entities": [{"value": "one", "synonyms": ["one"]}]}}))
+                et_name = (et.get("data") or {}).get("name", "")
+                check("temporary entityType created", bool(et_name), str(et.get("error"))[:160])
 
-                # Una ruta con destino a playbook: sin ella no hay nada que
-                # probar en los tres niveles (pagina, flow, grupo de rutas).
-                pb_ref = (f"projects/{proyecto}/locations/global/agents/{agente_escritura}"
+                # A route with a playbook target: without it there is nothing to
+                # test at the three levels (page, flow, route group).
+                pb_ref = (f"projects/{project}/locations/global/agents/{write_agent}"
                           f"/playbooks/{pb_id}")
-                ruta = [{"condition": "true", "targetPlaybook": pb_ref}]
+                routes = [{"condition": "true", "targetPlaybook": pb_ref}]
 
                 pflow = _first(await session.call_tool("cx_api", {
                     "method": "PATCH", "path": "agents/{agent}/flows/{flow}",
-                    "agent": agente_escritura, "project": proyecto,
+                    "agent": write_agent, "project": project,
                     "params": {"flow": flow_id},
-                    "body": {"name": f"projects/{proyecto}/locations/global/agents/{agente_escritura}"
-                                     f"/flows/{flow_id}", "transitionRoutes": ruta},
+                    "body": {"name": f"projects/{project}/locations/global/agents/{write_agent}"
+                                     f"/flows/{flow_id}", "transitionRoutes": routes},
                     "query": {"updateMask": "transitionRoutes"}}))
-                check("ruta con playbook en el flow temporal",
-                      bool(pflow.get("datos", {}).get("transitionRoutes")),
+                check("route with a playbook in the temporary flow",
+                      bool(pflow.get("data", {}).get("transitionRoutes")),
                       str(pflow.get("error"))[:140])
 
                 ppage = _first(await session.call_tool("cx_api", {
                     "method": "PATCH", "path": "agents/{agent}/flows/{flow}/pages/{page}",
-                    "agent": agente_escritura, "project": proyecto,
+                    "agent": write_agent, "project": project,
                     "params": {"flow": flow_id,
                                                 "page": page_name.rsplit("/", 1)[-1]},
-                    "body": {"name": page_name, "transitionRoutes": ruta},
+                    "body": {"name": page_name, "transitionRoutes": routes},
                     "query": {"updateMask": "transitionRoutes"}}))
-                check("ruta con playbook en la pagina temporal",
-                      bool(ppage.get("datos", {}).get("transitionRoutes")),
+                check("route with a playbook in the temporary page",
+                      bool(ppage.get("data", {}).get("transitionRoutes")),
                       str(ppage.get("error"))[:140])
 
                 grp = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/transitionRouteGroups",
-                    "agent": agente_escritura, "project": proyecto,
-                    "body": {"displayName": f"zz_tmp_smoke_grp_{marca}",
-                             "transitionRoutes": ruta}}))
-                group_name = (grp.get("datos") or {}).get("name", "")
-                check("grupo de rutas temporal creado", bool(group_name),
+                    "agent": write_agent, "project": project,
+                    "body": {"displayName": f"zz_tmp_smoke_grp_{mark}",
+                             "transitionRoutes": routes}}))
+                group_name = (grp.get("data") or {}).get("name", "")
+                check("temporary route group created", bool(group_name),
                       str(grp.get("error"))[:160])
 
-                # ------------------------------- destino a playbook (3 niveles)
-                print("\n== destino a playbook (los 3 niveles) ==")
+                # ------------------------------- playbook target (3 levels)
+                print("\n== playbook target (the 3 levels) ==")
                 r = _first(await session.call_tool("cx_set_route_playbook", {
-                    "agent": agente_escritura, "project": proyecto, "flow": flow_id,
+                    "agent": write_agent, "project": project, "flow": flow_id,
                     "page": page_name.rsplit("/", 1)[-1],
-                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
-                check("nivel pagina: dry-run", r.get("modo") == "dry-run",
-                      str(r.get("error") or r.get("modo"))[:140])
+                    "route": "true", "playbook": pb_name, "dry_run": True}))
+                check("page level: dry-run", r.get("mode") == "dry-run",
+                      str(r.get("error") or r.get("mode"))[:140])
 
                 fr = _first(await session.call_tool("cx_set_flow_route_playbook", {
-                    "agent": agente_escritura, "project": proyecto, "flow": flow_id,
-                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
-                check("nivel flow: dry-run", fr.get("modo") == "dry-run",
-                      str(fr.get("error") or fr.get("modo"))[:140])
+                    "agent": write_agent, "project": project, "flow": flow_id,
+                    "route": "true", "playbook": pb_name, "dry_run": True}))
+                check("flow level: dry-run", fr.get("mode") == "dry-run",
+                      str(fr.get("error") or fr.get("mode"))[:140])
 
                 gr = _first(await session.call_tool("cx_set_group_route_playbook", {
-                    "agent": agente_escritura, "project": proyecto,
+                    "agent": write_agent, "project": project,
                     "group": group_name.rsplit("/", 1)[-1],
-                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
-                check("nivel grupo de rutas: dry-run", gr.get("modo") == "dry-run",
-                      str(gr.get("error") or gr.get("modo"))[:140])
+                    "route": "true", "playbook": pb_name, "dry_run": True}))
+                check("route group level: dry-run", gr.get("mode") == "dry-run",
+                      str(gr.get("error") or gr.get("mode"))[:140])
 
-                # ------------------------------- escritura de un campo fuera de esquema
-                print("\n== cx_set_console_field (fuera de esquema) ==")
+                # ------------------------------- writing a field outside the schema
+                print("\n== cx_set_console_field (outside the schema) ==")
                 dry = _first(await session.call_tool("cx_set_console_field", {
-                    "recurso": et_name, "campo": "entities[0].dtmfPattern",
-                    "valor": "9", "dry_run": True, "agent": agente_escritura,
-                    "project": proyecto}))
-                check("dry-run no escribe", dry.get("modo") == "dry-run",
+                    "resource": et_name, "field": "entities[0].dtmfPattern",
+                    "value": "9", "dry_run": True, "agent": write_agent,
+                    "project": project}))
+                check("dry-run does not write", dry.get("mode") == "dry-run",
                       str(dry.get("error"))[:120])
                 wri = _first(await session.call_tool("cx_set_console_field", {
-                    "recurso": et_name, "campo": "entities[0].dtmfPattern",
-                    "valor": "9", "dry_run": False, "agent": agente_escritura,
-                    "project": proyecto}))
-                check("dtmfPattern escrito y verificado", wri.get("verificado") is True,
+                    "resource": et_name, "field": "entities[0].dtmfPattern",
+                    "value": "9", "dry_run": False, "agent": write_agent,
+                    "project": project}))
+                check("dtmfPattern written and verified", wri.get("verified") is True,
                       str(wri)[:200])
 
-                # ------------------------------- limites (la memoria del MCP)
+                # ------------------------------- limits (the memory of the MCP)
                 print("\n== cx_limites_api ==")
                 lim = _first(await session.call_tool("cx_limites_api", {}))
-                ids = {x.get("id") for x in (lim.get("limites") or [])}
-                check("cx_limites_api devuelve limites", len(ids) > 5, f"n={len(ids)}")
-                check("incluye el limite de los campos fuera de esquema",
-                      "campos_fuera_de_esquema" in ids, ", ".join(sorted(ids))[:120])
+                ids = {x.get("id") for x in (lim.get("limits") or [])}
+                check("cx_limites_api returns the limits", len(ids) > 5, f"n={len(ids)}")
+                check("it includes the limit of the fields outside the schema",
+                      "fields_outside_the_schema" in ids, ", ".join(sorted(ids))[:120])
             finally:
-                print("\n== limpieza ==")
+                print("\n== cleanup ==")
                 for path, params in (
                         (f"agents/{{agent}}/transitionRouteGroups/{group_name.rsplit('/', 1)[-1]}", {}),
                         (f"agents/{{agent}}/entityTypes/{et_name.rsplit('/', 1)[-1]}", {}),
@@ -318,17 +318,17 @@ async def main() -> int:
                     if "{" in path and path.split("/")[2] == "":
                         continue
                     rev = _first(await session.call_tool("cx_api", {
-                        "method": "DELETE", "path": path, "agent": agente_escritura,
-                        "project": proyecto, "params": params}))
-                    print(f"   borrado {path}: {rev.get('error') or 'ok'}")
+                        "method": "DELETE", "path": path, "agent": write_agent,
+                        "project": project, "params": params}))
+                    print(f"   deleted {path}: {rev.get('error') or 'ok'}")
 
-            # ------------------------------------------------------- guardas
-            print("\n== guardas ==")
+            # ------------------------------------------------------- guards
+            print("\n== guards ==")
             den = _first(await session.call_tool("cx_list_flows", {
                 "agent": "00000000-0000-0000-0000-000000000000"}))
-            check("agente sin permiso: denegado", "error" in den, str(den)[:120])
+            check("agent without permission: denied", "error" in den, str(den)[:120])
 
-    print(f"\n== {'TODO OK' if not FAIL else 'FALLOS: ' + ', '.join(FAIL)} ==")
+    print(f"\n== {'ALL OK' if not FAIL else 'FAILURES: ' + ', '.join(FAIL)} ==")
     return 1 if FAIL else 0
 
 

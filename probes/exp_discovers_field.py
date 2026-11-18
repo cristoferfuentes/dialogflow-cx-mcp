@@ -15,7 +15,7 @@ That type error reveals the EXACT path of the field (`environment.<field>` or
 With this, the fields that the public discovery doc does not declare can be
 probed, without guessing the type and without creating anything.
 
-    .venv/bin/python probes/exp_descubre_campo.py [--campo playbookConfigs]
+    .venv/bin/python probes/exp_discovers_field.py [--field playbookConfigs]
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ CAMPOS = [
 ]
 
 
-def _ruta_del_error(exc: Exception) -> str:
+def _error_path(exc: Exception) -> str:
     """Extracts the field path from the proto error message."""
     txt = str(exc)
     for marker in ("Invalid value at '", "unknown field \""):
@@ -50,37 +50,38 @@ def _ruta_del_error(exc: Exception) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agente", default="")
-    ap.add_argument("--proyecto", default="")
-    ap.add_argument("--campo", default="")
-    ap.add_argument("--donde", default="raiz",
-                    choices=["raiz", "versionConfigs"])
+    ap.add_argument("--agent", dest="agent", default="")
+    ap.add_argument("--project", dest="project", default="")
+    ap.add_argument("--field", dest="field", default="")
+    ap.add_argument("--where", dest="where", default="root",
+                    choices=["root", "raiz", "versionConfigs"],
+                    help="where the field is placed: at the root or inside versionConfigs")
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.only_agent()
-    proyecto = args.proyecto or cfg.project
+    agent = args.agent or cfg.only_agent()
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
-    base = f"/projects/{proyecto}/locations/{cfg.location}/agents/{agente}"
+    base = f"/projects/{project}/locations/{cfg.location}/agents/{agent}"
 
-    campos = [args.campo] if args.campo else CAMPOS
-    for campo in campos:
-        cuerpo: dict = {"displayName": "zz_tmp_disco_campo"}
-        if args.donde == "raiz":
-            cuerpo[campo] = "BASURA"
+    fields = [args.field] if args.field else CAMPOS
+    for field in fields:
+        body: dict = {"displayName": "zz_tmp_disco_campo"}
+        if args.where in ("root", "raiz"):
+            body[field] = "BASURA"
         else:
-            cuerpo["versionConfigs"] = [{"version": "BASURA", campo: "BASURA"}]
+            body["versionConfigs"] = [{"version": "BASURA", field: "BASURA"}]
         try:
-            cons.request("POST", cons._url(f"{base}/environments"), body=cuerpo)
-            print(f"  {args.donde}.{campo:<26} -> no type error "
+            cons.request("POST", cons._url(f"{base}/environments"), body=body)
+            print(f"  {args.where}.{field:<26} -> no type error "
                   f"(field NOT declared or validated earlier)")
         except Exception as exc:
-            ruta = _ruta_del_error(exc)
-            if campo in ruta or campo.lower().replace("_", "") in ruta.lower().replace("_", ""):
-                print(f"  {args.donde}.{campo:<26} -> *** DECLARED: {ruta} ***")
+            route = _error_path(exc)
+            if field in route or field.lower().replace("_", "") in route.lower().replace("_", ""):
+                print(f"  {args.where}.{field:<26} -> *** DECLARED: {route} ***")
                 print("     ", str(exc)[:260].replace("\n", " "))
             else:
-                print(f"  {args.donde}.{campo:<26} -> path={ruta or '(no path)'} "
+                print(f"  {args.where}.{field:<26} -> path={route or '(no path)'} "
                       f"| {str(exc)[:90]}".replace("\n", " "))
     return 0
 

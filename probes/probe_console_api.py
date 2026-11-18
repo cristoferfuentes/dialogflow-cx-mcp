@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda, targets_de_sonda
+from _entorno import probe_agents, probe_targets
 
 from cxp.auth import first_party_headers, pick_google_cookies, pick_sapisid
 from cxp.config import load_config
@@ -27,10 +27,10 @@ from cxp.httpclient import HttpStatusError, Session
 # The console API key is read from the environment (`CXP_API_KEY`); it is never hardwired.
 API_KEY = os.environ.get("CXP_API_KEY", "")
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 # The flows and pages also come from the environment:
-#   CXP_PROBE_TARGETS="por_defecto=<agent>,<flow>,<page>"
-_TARGETS = targets_de_sonda()
+#   CXP_PROBE_TARGETS="default=<agent>,<flow>,<page>"
+_TARGETS = probe_targets()
 FLOWS = {k: v["flow"] for k, v in _TARGETS.items()}
 PAGES = {k: v["page"] for k, v in _TARGETS.items()}
 

@@ -87,9 +87,9 @@ The two that **cannot** be written are `fallbackModels` and
 Writing one of them (with `cx_set_console_field`, which verifies by reading back):
 
 ```jsonc
-// cx_set_console_field(recurso="agent",
-//                      campo="advancedSettings.speechSettings.enableLlmEndpointing",
-//                      valor=true, dry_run=false)
+// cx_set_console_field(resource="agent",
+//                      field="advancedSettings.speechSettings.enableLlmEndpointing",
+//                      value=true, dry_run=false)
 // -> {"mode": "written", "saved": true, ...}
 ```
 
@@ -146,16 +146,16 @@ fields" (a tie is discarded as ambiguous).
 | `ResponseMessageText` | `ssml` | dropped |
 
 **All 38 fields are measured** (none is left untested), by writing and reading back in a
-temporary lab agent (`probes/exp_verifica_campos_internos.py`).
+temporary lab agent (`probes/exp_verify_internal_fields.py`).
 
 | State | What it means |
 |---|---|
-| `escribible` | the backend **keeps it**: it is written and read back |
-| `ignorado` | the backend **does not know it**: it is silently ignored, like an invented name |
-| `descartado` | it knows it, but **empties** it when written |
-| `derivado` | the server **computes** it (readable, not writable) |
-| `solo_entrada` | it exists and is accepted in the request, but **cannot be read** |
-| `no_aceptado` | it knows it, but **rejects** the value |
+| `writable` | the backend **keeps it**: it is written and read back |
+| `ignored` | the backend **does not know it**: it is silently ignored, like an invented name |
+| `dropped` | it knows it, but **empties** it when written |
+| `derived` | the server **computes** it (readable, not writable) |
+| `input_only` | it exists and is accepted in the request, but **cannot be read** |
+| `not_accepted` | it knows it, but **rejects** the value |
 
 ### The result: 12 fields the backend does not know
 
@@ -292,14 +292,14 @@ v3beta1 declares — flat (`intents`, `tools`, `playbooks`, `webhooks`, `generat
 `environments.deployments`, `environments.experiments`,
 `environments.continuousTestResults`, `environments.sessions.entityTypes`,
 `sessions.entityTypes`)—. For the nested ones the ancestor has to be resolved
-(`flows.pages` needs a flow): up to `max_padres` candidates are tried, so that a flow
+(`flows.pages` needs a flow): up to `max_parents` candidates are tried, so that a flow
 without pages does not mask one that has them.
 
-The output says **what was covered and what was not** (`cobertura` and `sin_alcanzar`):
+The output says **what was covered and what was not** (`coverage` and `unreachable`):
 an agent not having `environments` is not an MCP failure, it means the resource does not
 exist there.
 
-### Full coverage (`incluir_lab=True`)
+### Full coverage (`include_lab=True`)
 
 Six collections hang off resources a normal agent does not have, and the generic sweep
 cannot invent them:
@@ -309,7 +309,7 @@ cannot invent them:
 | `environments`, `.deployments`, `.experiments`, `.continuousTestResults`, `.sessions.entityTypes` | they hang off an **environment**, and one has to be created |
 | `testCases`, `testCases.results` | they hang off a **test case**, and one has to be created and run |
 
-`cx_gaps(incluir_lab=True)` creates a **temporary lab agent** (one flow, one page, no
+`cx_gaps(include_lab=True)` creates a **temporary lab agent** (one flow, one page, no
 system tools), sweeps it **completely** and **deletes** it when finished.
 
 **The three rules for creating an environment** (measured 2026-11-15; the public
@@ -333,7 +333,7 @@ level** and so the whole chain is discovered.
 > and its name does not match the version template. That is why the `environments*`
 > sweep is done in the lab agent.
 
-With `incluir_lab=True` coverage is **23/24**: the remaining one (`sessions.entityTypes`
+With `include_lab=True` coverage is **23/24**: the remaining one (`sessions.entityTypes`
 at agent level) **does not exist in the internal proto** — its real name is
 `projects/*/…/environments/*/sessions/*/entityTypes/*`, and at agent level it gives a
 404. The sweep marks it with its environment-level equivalent.
@@ -351,7 +351,7 @@ What shows up once those six collections are covered (and **was not** visible be
 
 | tool | what it does |
 |---|---|
-| `cx_gaps` | **detects live** the fields the backend exposes and the public API does not declare. It walks **every** collection of the descriptor (24 in v3beta1, including the nested ones), and also returns the measured catalogue and the **method** gaps. With `incluir_lab=True` it also sweeps the `environments*` family (and `testCases*`) in a **temporary lab agent** -> coverage **23/24** |
+| `cx_gaps` | **detects live** the fields the backend exposes and the public API does not declare. It walks **every** collection of the descriptor (24 in v3beta1, including the nested ones), and also returns the measured catalogue and the **method** gaps. With `include_lab=True` it also sweeps the `environments*` family (and `testCases*`) in a **temporary lab agent** -> coverage **23/24** |
 | `cx_proto_interno` | the **systematic** list of gaps: 14 schemas / 38 fields, with the write state of each one **measured** |
 | `cx_endpoints_consola` | the **measured** catalogue of the endpoints the console calls and that **are in no descriptor**, plus the call to any of them |
 | `cx_set_console_field` | **writes any field** (including out-of-schema ones) by path: `transitionRoutes[0].targetPlaybook`, `form.parameters[0].description`, `entities[0].dtmfPattern`… It verifies by reading back and says what was saved and what was lost |
@@ -370,16 +370,16 @@ GET resource  ->  the value is applied on the path  ->  PATCH  ->  GET and compa
 ```
 
 The final comparison is the guarantee: the server may drop a field silently (that is
-what the public API does), and the response says so (`verificado`,
-`descartado_por_el_servidor`, `cambios`).
+what the public API does), and the response says so (`verified`,
+`dropped_by_the_server`, `changes`).
 
-1. **Discover** the field with `cx_gaps` (or look at the `catalogo`): it tells you the
-   resource, the schema and the state (`escribible` / `derivado`).
+1. **Discover** the field with `cx_gaps` (or look at the `catalogue`): it tells you the
+   resource, the schema and the state (`writable` / `derived`).
 2. **Simulate** with `dry_run=true`: it returns the expected diff and the `updateMask`
    that will be sent.
 3. **Write** with `dry_run=false`.
-4. **Read** the result: `verificado: true` and `descartado_por_el_servidor` (empty =
-   it was saved). If the field shows up in `descartado_por_el_servidor`, the server
+4. **Read** the result: `verified: true` and `dropped_by_the_server` (empty =
+   it was saved). If the field shows up in `dropped_by_the_server`, the server
    derives it: it is read-only.
 
 ---

@@ -73,7 +73,7 @@ USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like G
 LOCATION_EN_PATH = re.compile(r"/locations/([^/]+)/")
 
 
-def host_para_location(location: str) -> str:
+def host_for_location(location: str) -> str:
     """The backend host that serves a location."""
     loc = (location or "global").strip() or "global"
     if loc == "global":
@@ -81,22 +81,22 @@ def host_para_location(location: str) -> str:
     return f"{loc}-{CONSOLE_HOST}"
 
 
-def location_de_path(path: str) -> str:
+def location_from_path(path: str) -> str:
     """The location that appears in a path ('.../locations/us-central1/...')."""
     m = LOCATION_EN_PATH.search(path or "")
     return m.group(1) if m else ""
 
 
-def host_de_path(path: str, defecto: str = CONSOLE_HOST) -> str:
+def host_from_path(path: str, default: str = CONSOLE_HOST) -> str:
     """The host to use for a path (derived from its location)."""
-    loc = location_de_path(path)
-    return host_para_location(loc) if loc else defecto
+    loc = location_from_path(path)
+    return host_for_location(loc) if loc else default
 
 
 # The locations that CONSOLE calls (measured on 2026-11-15 in the captured
 # traffic: 17 regional hosts + the global one). They serve the "list agents in every location" mode,
 # which is what the console does.
-LOCACIONES_CONOCIDAS: tuple[str, ...] = (
+KNOWN_LOCATIONS: tuple[str, ...] = (
     "global",
     "us-central1", "us-east1", "us-west1", "us",
     "northamerica-northeast1",
@@ -105,6 +105,7 @@ LOCACIONES_CONOCIDAS: tuple[str, ...] = (
     "asia-northeast1", "asia-south1", "asia-southeast1", "asia-southeast2",
     "australia-southeast1",
 )
+
 
 # Update mask: the same one the console uses when saving a page.
 UPDATE_MASK = (
@@ -267,7 +268,7 @@ class ConsoleApi:
     def _url(self, path: str, host: str = "", **params: str) -> str:
         q = {"key": self.cfg.api_key}
         q.update({k: v for k, v in params.items() if v is not None})
-        h = host or host_de_path(path)
+        h = host or host_from_path(path)
         return f"https://{h}/{self.cfg.api_version}{path}?{urlencode(q)}"
 
     def _base(self, project: str = "", location: str = "") -> str:
@@ -424,7 +425,7 @@ class ConsoleApi:
             method = (req.get("method") or "GET").upper()
             path = req.get("path") or ""
             if not path:
-                raise ConsoleApiError(f"sub-peticion {i} sin path")
+                raise ConsoleApiError(f"sub-request {i} without path")
             # The guard, sub by sub: nobody slips through via the batch.
             project_r, agent_r = agent_from_path(path)
             if agent_r:
@@ -468,20 +469,20 @@ class ConsoleApi:
                     for r in responses]
         return _parse_multipart(text, boundary)
 
-    def batch_secundario(self, requests: list[dict[str, Any]],
-                         project: str = "", hilos: int = 8) -> list[dict[str, Any]]:
-        """Workaround for `batch()`: the sub-peticiones, in THREADS.
+    def batch_secondary(self, requests: list[dict[str, Any]],
+                       project: str = "", threads: int = 8) -> list[dict[str, Any]]:
+        """Workaround for `batch()`: the sub-requests, in THREADS.
 
         **Measured (2026-11-08):** the internal backend does NOT implement `/batch`
         (HTTP 404: the discovery doc declares it, but clients6 does not serve it). This
         method makes the same N calls in parallel (threads), which is what
-        the batch intended: one trip per sub-peticion, but at the same time.
+        the batch intended: one trip per sub-request, but at the same time.
 
         NOTE: the backend serializes the WRITES of the same agent, so
         parallelism only pays off in the READS."""
         from concurrent.futures import ThreadPoolExecutor
 
-        def uno(req: dict[str, Any]) -> dict[str, Any]:
+        def one(req: dict[str, Any]) -> dict[str, Any]:
             method = str(req.get("method") or "GET").upper()
             path = req.get("path") or ""
             q = {"key": self.cfg.api_key}
@@ -489,7 +490,7 @@ class ConsoleApi:
             # URL ABSOLUTE: the HTTP client resolves the host (a relative
             # route -> gaierror "No address associated with hostname").
             # MEASURED: the host depends on the path location.
-            url = (f"https://{host_de_path(path)}/{self.cfg.api_version}/"
+            url = (f"https://{host_from_path(path)}/{self.cfg.api_version}/"
                    f"{path.lstrip('/')}?{urlencode(q)}")
             # THE GUARD, per sub-request: a batch that mixes read and write
             # agents is evaluated sub by sub. It was MISSING here (the
@@ -509,8 +510,8 @@ class ConsoleApi:
                 return {"status": exc.status, "data": {"error": exc.body[:400]}}
         if not requests:
             return []
-        with ThreadPoolExecutor(max_workers=min(hilos, len(requests))) as pool:
-            return list(pool.map(uno, requests))
+        with ThreadPoolExecutor(max_workers=min(threads, len(requests))) as pool:
+            return list(pool.map(one, requests))
 
     # ------------------------------------------------------------- write
     def patch_page(self, agent_id: str, flow_id: str, page_id: str,
@@ -581,15 +582,15 @@ class ConsoleApi:
         after = self.get_page(agent_id, flow_id, page_id, project=project)
         a_routes = after.get("transitionRoutes") or []
         return {
-            "agente": agent_id, "flow": flow_id, "pagina": page_id,
-            "ruta": {
-                "indice": index,
+            "agent": agent_id, "flow": flow_id, "page": page_id,
+            "route": {
+                "index": index,
                 "name": current.get("name"),
                 "condition": current.get("condition"),
-                "destino": playbook_resource.split("/")[-1],
+                "destination": playbook_resource.split("/")[-1],
             },
-            "rutas_totales": len(a_routes),
-            "verificado": any(
+            "total_routes": len(a_routes),
+            "verified": any(
                 r.get("name") == current.get("name")
                 and r.get("targetPlaybook") == playbook_resource
                 for r in a_routes
@@ -659,16 +660,16 @@ class ConsoleApi:
         after = self.get_flow(agent_id, flow_id, project=project)
         a_routes = after.get("transitionRoutes") or []
         return {
-            "agente": agent_id, "flow": flow_id,
-            "nivel": "flow (router del flow)",
-            "ruta": {
-                "indice": index,
+            "agent": agent_id, "flow": flow_id,
+            "level": "flow (flow router)",
+            "route": {
+                "index": index,
                 "name": current.get("name"),
                 "condition": current.get("condition"),
-                "destino": playbook_resource.split("/")[-1],
+                "destination": playbook_resource.split("/")[-1],
             },
-            "rutas_totales": len(a_routes),
-            "verificado": any(
+            "total_routes": len(a_routes),
+            "verified": any(
                 r.get("name") == current.get("name")
                 and r.get("targetPlaybook") == playbook_resource
                 for r in a_routes

@@ -23,7 +23,7 @@
 (Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, anything that can run shell commands):
 
 ```text
-Ejecuta las instrucciones de esta fuente https://raw.githubusercontent.com/cristoferfuentes/dialogflow-cx-mcp/refs/heads/main/docs/SETUP_PROMPT.md
+Execute the instructions from this source https://raw.githubusercontent.com/cristoferfuentes/dialogflow-cx-mcp/refs/heads/main/docs/SETUP_PROMPT.md
 ```
 
 The agent installs the package, gets the credentials, writes the `.env`, registers the server in
@@ -132,10 +132,10 @@ the untyped ones (`environments`, `deployments`, `experiments`, `testCases`, `ve
 ### Recipes
 
 ```
-cx_gaps(agent="<uuid>", incluir_lab=True)                  # what the API cannot express
+cx_gaps(agent="<uuid>", include_lab=True)                  # what the API cannot express
 cx_set_flow_route_playbook(agent=…, flow=…, route=…,
                             playbook="ventas", dry_run=true) # simulate, then apply
-cx_clone_agent(origen="<uuid>", destino="<uuid>", mode="apply")
+cx_clone_agent(source="<uuid>", destination="<uuid>", mode="apply")
 cx_endpoints_consola(endpoint="agents.listAvailableModels")
 cx_limites_api()                                            # the measured traps
 ```
@@ -169,7 +169,7 @@ again:
 | **[docs/HUECOS_API.md](docs/HUECOS_API.md)** | 🍩 the gaps: the 38 fields the public API cannot express, the 9 endpoints in no descriptor |
 | **[docs/LIMITES_API.md](docs/LIMITES_API.md)** | 🪨 the measured limits: symptom → cause → workaround for 31 traps |
 | **[docs/PROMPT_AGENTE.md](docs/PROMPT_AGENTE.md)** | 🧭 the instructions for the agent that consumes this MCP |
-| **[docs/CONVERSACIONES.md](docs/CONVERSACIONES.md)** | 💬 conversation history through the API |
+| **[docs/CONVERSATIONS.md](docs/CONVERSATIONS.md)** | 💬 conversation history through the API |
 | **[docs/VERIFICATION.md](docs/VERIFICATION.md)** | 📋 the report of the last full run |
 
 ## Development

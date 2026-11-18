@@ -20,7 +20,7 @@ Solution: a lab agent with a minimal graph (one flow, one page,
 no system tools), in which the environment CAN be created. Everything that is
 created is DELETED at the end (the whole agent).
 
-    .venv/bin/python probes/exp_agente_lab.py [--out /tmp/agente_lab.json]
+    .venv/bin/python probes/exp_lab_agent.py [--out /tmp/lab_agent.json]
 """
 from __future__ import annotations
 
@@ -35,71 +35,71 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cxp.config import load_config
 from cxp.console_api import ConsoleApi
-from cxp.gaps import load_schema_index, scan_coleccion
+from cxp.gaps import load_schema_index, scan_collection
 
 
-def esperar(cons: ConsoleApi, op: dict, segundos: int = 240) -> dict:
-    nombre = op.get("name")
-    if not nombre or op.get("done") or "/operations/" not in nombre:
+def wait_for(cons: ConsoleApi, op: dict, seconds: int = 240) -> dict:
+    name = op.get("name")
+    if not name or op.get("done") or "/operations/" not in name:
         return op
-    for _ in range(segundos * 2):
+    for _ in range(seconds * 2):
         time.sleep(0.5)
-        op = cons.request("GET", cons._url("/" + nombre))
+        op = cons.request("GET", cons._url("/" + name))
         if op.get("done"):
             return op
     return op
 
 
-def barrer(cons: ConsoleApi, idx, url: str, clave: str, etiqueta: str) -> dict:
+def sweep(cons: ConsoleApi, idx, url: str, key: str, label: str) -> dict:
     try:
         data = cons.request("GET", url)
     except Exception as exc:
-        return {"estado": "error", "detalle": str(exc)[:250]}
+        return {"status": "error", "detail": str(exc)[:250]}
     if isinstance(data, list):
-        data = {clave.split(".")[-1]: data}
-    b = scan_coleccion(data, idx, clave)
-    return {"estado": "ok", "clave": clave, "detalle": etiqueta,
-            "campos": sorted(data.keys()) if isinstance(data, dict) else [],
-            "envoltorio": b["envoltorio"], "items": b["items"],
+        data = {key.split(".")[-1]: data}
+    b = scan_collection(data, idx, key)
+    return {"status": "ok", "key": key, "detail": label,
+            "fields": sorted(data.keys()) if isinstance(data, dict) else [],
+            "wrapper": b["wrapper"], "items": b["items"],
             "n_items": b["n_items"],
-            "esquema_envoltorio": b["esquema_envoltorio"],
-            "esquema_item": b["esquema_item"]}
+            "wrapper_schema": b["wrapper_schema"],
+            "item_schema": b["item_schema"]}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--proyecto", default="")
-    ap.add_argument("--out", default="/tmp/agente_lab.json")
+    ap.add_argument("--project", dest="project", default="")
+    ap.add_argument("--out", default="/tmp/lab_agent.json")
     args = ap.parse_args()
 
     cfg = load_config()
-    proyecto = args.proyecto or cfg.project
+    project = args.project or cfg.project
     cons = ConsoleApi(cfg)
     idx = load_schema_index(cfg.api_version)
-    base = f"/projects/{proyecto}/locations/{cfg.location}/agents"
-    res: dict = {"proyecto": proyecto, "mediciones": {}, "temporales": {}}
-    agente = ""
+    base = f"/projects/{project}/locations/{cfg.location}/agents"
+    res: dict = {"project": project, "measurements": {}, "temporary": {}}
+    agent = ""
     flow = ""
-    entorno = ""
+    environment = ""
 
     try:
         # ------------------------------------------------ 1) lab agent
-        cuerpo = {"displayName": f"zz_tmp_lab_{uuid.uuid4().hex[:6]}",
-                  "defaultLanguageCode": "es",
-                  "timeZone": "America/Santiago",
-                  "description": "temporal: barrido de entornos"}
-        creado = cons.request("POST", cons._url(base), body=cuerpo)
-        agente = creado.get("name") or ""
-        if not agente:
-            print("Could NOT create the agent:", json.dumps(creado,
+        body = {"displayName": f"zz_tmp_lab_{uuid.uuid4().hex[:6]}",
+                 "defaultLanguageCode": "es",
+                 "timeZone": "America/Santiago",
+                 "description": "temporary: environment sweep"}
+        created = cons.request("POST", cons._url(base), body=body)
+        agent = created.get("name") or ""
+        if not agent:
+            print("Could NOT create the agent:", json.dumps(created,
                                                            ensure_ascii=False)[:300])
             return 1
-        res["temporales"]["agente"] = agente
-        print("lab agent:", agente)
+        res["temporary"]["agent"] = agent
+        print("lab agent:", agent)
         # The guard only allows writes on allowlisted agents: this one is
         # new, so it is added IN MEMORY (the .env is not touched).
-        cfg.agent_readwrite = list(cfg.agent_readwrite) + [agente.rsplit("/", 1)[-1]]
-        abase = base + "/" + agente.rsplit("/", 1)[-1]
+        cfg.agent_readwrite = list(cfg.agent_readwrite) + [agent.rsplit("/", 1)[-1]]
+        abase = base + "/" + agent.rsplit("/", 1)[-1]
 
         # ------------------------------------------------------ 2) flow and page
         f = cons.request("POST", cons._url(f"{abase}/flows"),
@@ -108,7 +108,7 @@ def main() -> int:
                                "eventHandlers": []})
         flow = f.get("name") or ""
         print("flow:", flow)
-        res["temporales"]["flow"] = flow
+        res["temporary"]["flow"] = flow
         fid = flow.rsplit("/", 1)[-1]
         cons.request("POST", cons._url(f"{abase}/flows/{fid}/pages"),
                      body={"displayName": "lab_page",
@@ -125,121 +125,119 @@ def main() -> int:
         vcs: list[dict] = []
         flows = cons.request("GET", cons._url(f"{abase}/flows", pageSize="100"))
         for fl in (flows.get("flows") or []):
-            ffl = fl["name"].rsplit("/", 1)[-1]
-            op = esperar(cons, cons.request(
-                "POST", cons._url(f"{abase}/flows/{ffl}/versions"),
+            flow_id = fl["name"].rsplit("/", 1)[-1]
+            op = wait_for(cons, cons.request(
+                "POST", cons._url(f"{abase}/flows/{flow_id}/versions"),
                 body={"displayName": f"lab_version_{uuid.uuid4().hex[:4]}",
-                      "description": "temporal: barrido"}))
+                      "description": "temporary: sweep"}))
             v = (op.get("response") or {}).get("name") or ""
             if v:
                 vcs.append({"version": v})
                 if not version:
                     version = v
         print("versions:", len(vcs))
-        res["temporales"]["version"] = version
+        res["temporary"]["version"] = version
         if not vcs:
             return 1
 
         # ------------------------------------------------------ 4) environment
-        op = esperar(cons, cons.request(
+        op = wait_for(cons, cons.request(
             "POST", cons._url(f"{abase}/environments"),
-            body={"displayName": "lab_entorno", "description": "temporal",
+            body={"displayName": "lab_environment", "description": "temporary",
                   "versionConfigs": vcs}))
-        resp = op.get("response") or {}
-        entorno = resp.get("name") or ""
-        if not entorno:
+        response = op.get("response") or {}
+        environment = response.get("name") or ""
+        if not environment:
             print("Could NOT create the environment:",
                   json.dumps(op.get("error"), ensure_ascii=False)[:400])
-            res["mediciones"]["environments.create"] = {
-                "estado": "error",
-                "detalle": json.dumps(op.get("error"), ensure_ascii=False)[:400]}
+            res["measurements"]["environments.create"] = {
+                "status": "error",
+                "detail": json.dumps(op.get("error"), ensure_ascii=False)[:400]}
             return 1
-        res["temporales"]["entorno"] = entorno
-        print("environment:", entorno)
+        res["temporary"]["environment"] = environment
+        print("environment:", environment)
 
         # ------------------------------------------------------- 5) sweep
-        res["mediciones"]["environments"] = barrer(
-            cons, idx, cons._url("/" + entorno), "environments", entorno)
-        print("environments:", json.dumps(res["mediciones"]["environments"],
+        res["measurements"]["environments"] = sweep(
+            cons, idx, cons._url("/" + environment), "environments", environment)
+        print("environments:", json.dumps(res["measurements"]["environments"],
                                            ensure_ascii=False)[:700])
 
         # deployment
-        op = esperar(cons, cons.request(
-            "POST", cons._url(f"/{entorno}/deployments"),
+        op = wait_for(cons, cons.request(
+            "POST", cons._url(f"/{environment}/deployments"),
             body={"flowVersion": version}))
-        dep = (op.get("response") or {}).get("name") or op.get("name") or ""
-        print("deployment:", dep or json.dumps(op.get("error"),
+        deployment = (op.get("response") or {}).get("name") or op.get("name") or ""
+        print("deployment:", deployment or json.dumps(op.get("error"),
                                                ensure_ascii=False)[:200])
         print("  raw op:", json.dumps(op, ensure_ascii=False)[:400])
-        if dep:
-            res["mediciones"]["environments.deployments"] = barrer(
-                cons, idx, cons._url("/" + dep), "environments.deployments", dep)
+        if deployment:
+            res["measurements"]["environments.deployments"] = sweep(
+                cons, idx, cons._url("/" + deployment), "environments.deployments", deployment)
             print("  deployments:", json.dumps(
-                res["mediciones"]["environments.deployments"],
+                res["measurements"]["environments.deployments"],
                 ensure_ascii=False)[:600])
 
         # experiment
-        op = esperar(cons, cons.request(
-            "POST", cons._url(f"/{entorno}/experiments"),
-            body={"displayName": "lab_experiment", "description": "temporal",
-                  "definition": {"environment": entorno}}))
-        exp = (op.get("response") or {}).get("name") or op.get("name") or ""
-        print("experiment:", exp or json.dumps(op.get("error"),
+        op = wait_for(cons, cons.request(
+            "POST", cons._url(f"/{environment}/experiments"),
+            body={"displayName": "lab_experiment", "description": "temporary",
+                  "definition": {"environment": environment}}))
+        experiment = (op.get("response") or {}).get("name") or op.get("name") or ""
+        print("experiment:", experiment or json.dumps(op.get("error"),
                                                ensure_ascii=False)[:200])
         print("  raw op:", json.dumps(op, ensure_ascii=False)[:400])
-        if exp:
-            res["temporales"]["experiment"] = exp
-            res["mediciones"]["environments.experiments"] = barrer(
-                cons, idx, cons._url("/" + exp), "environments.experiments", exp)
+        if experiment:
+            res["temporary"]["experiment"] = experiment
+            res["measurements"]["environments.experiments"] = sweep(
+                cons, idx, cons._url("/" + experiment), "environments.experiments", experiment)
             print("  experiments:", json.dumps(
-                res["medications"], ensure_ascii=False)[:600]
-                if "medications" in res else json.dumps(
-                res["mediciones"]["environments.experiments"],
+                res["measurements"]["environments.experiments"],
                 ensure_ascii=False)[:600])
 
         # continuous results
-        res["mediciones"]["environments.continuousTestResults"] = barrer(
-            cons, idx, cons._url(f"/{entorno}/continuousTestResults"),
-            "environments.continuousTestResults", entorno)
+        res["measurements"]["environments.continuousTestResults"] = sweep(
+            cons, idx, cons._url(f"/{environment}/continuousTestResults"),
+            "environments.continuousTestResults", environment)
         print("continuousTestResults:", json.dumps(
-            res["mediciones"]["environments.continuousTestResults"],
+            res["measurements"]["environments.continuousTestResults"],
             ensure_ascii=False)[:500])
 
         # session inside the environment
         sid = f"lab-{uuid.uuid4().hex[:8]}"
         try:
-            cons.request("POST", cons._url(f"/{entorno}/sessions/{sid}:detectIntent"),
+            cons.request("POST", cons._url(f"/{environment}/sessions/{sid}:detectIntent"),
                          body={"queryInput": {"text": {"text": "hola"},
                                               "languageCode": "es"}})
-            res["mediciones"]["environments.sessions.entityTypes"] = barrer(
-                cons, idx, cons._url(f"/{entorno}/sessions/{sid}/entityTypes"),
+            res["measurements"]["environments.sessions.entityTypes"] = sweep(
+                cons, idx, cons._url(f"/{environment}/sessions/{sid}/entityTypes"),
                 "environments.sessions.entityTypes", sid)
             print("sessions.entityTypes:", json.dumps(
-                res["mediciones"]["environments.sessions.entityTypes"],
+                res["measurements"]["environments.sessions.entityTypes"],
                 ensure_ascii=False)[:500])
         except Exception as exc:
             print("ERROR in the session:", str(exc)[:200])
-            res["mediciones"]["environments.sessions.entityTypes"] = {
-                "estado": "error", "detalle": str(exc)[:250]}
+            res["measurements"]["environments.sessions.entityTypes"] = {
+                "status": "error", "detail": str(exc)[:250]}
 
     finally:
         # ------------------------------------------------------- cleanup
-        if res["temporales"].get("experiment"):
+        if res["temporary"].get("experiment"):
             try:
                 cons.request("DELETE",
-                             cons._url("/" + res["temporales"]["experiment"]))
+                             cons._url("/" + res["temporary"]["experiment"]))
                 print("experiment deleted")
             except Exception as exc:
                 print("Could NOT delete the experiment:", str(exc)[:150])
-        if entorno:
+        if environment:
             try:
-                cons.request("DELETE", cons._url("/" + entorno))
+                cons.request("DELETE", cons._url("/" + environment))
                 print("environment deleted")
             except Exception as exc:
                 print("Could NOT delete the environment:", str(exc)[:200])
-        if agente:
+        if agent:
             try:
-                cons.request("DELETE", cons._url("/" + agente))
+                cons.request("DELETE", cons._url("/" + agent))
                 print("lab agent deleted")
             except Exception as exc:
                 print("Could NOT delete the agent:", str(exc)[:250])

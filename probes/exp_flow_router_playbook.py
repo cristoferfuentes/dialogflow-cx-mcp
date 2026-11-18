@@ -56,7 +56,7 @@ def main() -> int:
         # ------------------------------------------------ temporary flow
         created = api.request("POST", api._url(f"{base}/flows", alt="json"),
                               body={"displayName": TMP_FLOW,
-                                    "description": "temporal - probe"})
+                                    "description": "temporary - probe"})
         flow_id = created["name"].split("/")[-1]
         print(f"temporary flow created: {flow_id}")
 
@@ -91,9 +91,9 @@ def main() -> int:
             try:
                 api.request("DELETE", api._url(f"{base}/flows/{flow_id}", alt="json"))
                 print(f"\ntemporary flow DELETED: {flow_id}")
-                vivos = [f for f in api.list_flows(agent_id)
+                alive = [f for f in api.list_flows(agent_id)
                          if f["name"].split("/")[-1] == flow_id]
-                print("   still in the agent?", bool(vivos))
+                print("   still in the agent?", bool(alive))
             except HttpStatusError as e:
                 print(f"\n!! COULD NOT DELETE the flow {flow_id}: HTTP {e.status}")
 

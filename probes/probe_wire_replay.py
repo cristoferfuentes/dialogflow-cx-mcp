@@ -16,14 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agente, targets_de_sonda
-from _redact import escribe_privado
+from _entorno import agent, probe_targets
+from _redact import write_private
 
 from cxp.config import load_config
 from cxp.console_api import CONSOLE_HOST, sapisid_authorization
 
-ORIG = agente("por_defecto")
-_TARGET = next(iter(targets_de_sonda().values()), {"flow": "", "page": ""})
+ORIG = agent("default")
+_TARGET = next(iter(probe_targets().values()), {"flow": "", "page": ""})
 OF = _TARGET["flow"]
 OP = _TARGET["page"]
 
@@ -79,7 +79,7 @@ def main() -> int:
     hdrs = {k: v for k, v in w.items() if not k.startswith(":") and k != "cookie"}
     hdrs["cookie"] = w.get("cookie", "")
     # The file carries the live cookie: only its owner can read it.
-    escribe_privado("/tmp/wire_exact.txt",
+    write_private("/tmp/wire_exact.txt",
                    "\n".join(f"{k}: {v}" for k, v in hdrs.items()))
 
     for label, extra in (("http2", ["--http2"]), ("http1.1", ["--http1.1"])):

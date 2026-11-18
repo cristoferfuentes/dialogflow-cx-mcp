@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cxp.config import load_config
 from cxp.console_api import ConsoleApi
 
-RESULTADOS: list[tuple[str, bool, str]] = []
+RESULTS: list[tuple[str, bool, str]] = []
 
 
 def main() -> int:
@@ -37,64 +37,64 @@ def main() -> int:
     def post(path, body):
         return api.request("POST", api._url(path), body)
 
-    def borrar(path):
+    def delete(path):
         return api.request("DELETE", api._url(path))
 
-    def leer_en(ruta, obj):
+    def read_at(path, obj):
         cur = obj
-        for parte in ruta.split("."):
+        for part in path.split("."):
             if isinstance(cur, list):
                 cur = cur[0] if cur else None
             if not isinstance(cur, dict):
                 return None
-            cur = cur.get(parte)
+            cur = cur.get(part)
         return cur
 
-    def probar(etiqueta, nombre, mutador, mascara, ruta, valor, revertir=True):
+    def test_field(label, name, mutator, mask, path, value, revert=True):
         try:
-            before = get(nombre)
-            copia = copy.deepcopy(before)
-            mutador(copia, valor)
-            respuesta = patch(nombre, copia, mascara)
-            after = get(nombre)
-            leido = leer_en(ruta, after)
-            ok = leido == valor
-            RESULTADOS.append((etiqueta, ok, json.dumps(leido, ensure_ascii=False)[:120]))
-            print(f"  [{'OK ' if ok else 'NO '}] {etiqueta} -> {json.dumps(leido, ensure_ascii=False)[:110]}")
+            before = get(name)
+            draft = copy.deepcopy(before)
+            mutator(draft, value)
+            response = patch(name, draft, mask)
+            after = get(name)
+            read = read_at(path, after)
+            ok = read == value
+            RESULTS.append((label, ok, json.dumps(read, ensure_ascii=False)[:120]))
+            print(f"  [{'OK ' if ok else 'NO '}] {label} -> {json.dumps(read, ensure_ascii=False)[:110]}")
             if not ok:
-                print("        response:", json.dumps(respuesta, ensure_ascii=False)[:260])
-            if revertir:
-                patch(nombre, before, mascara)
+                print("        response:", json.dumps(response, ensure_ascii=False)[:260])
+            if revert:
+                patch(name, before, mask)
         except Exception as exc:
-            RESULTADOS.append((etiqueta, False, f"{type(exc).__name__}: {exc}"))
-            print(f"  [ERR] {etiqueta}: {str(exc)[:260]}")
+            RESULTS.append((label, False, f"{type(exc).__name__}: {exc}"))
+            print(f"  [ERR] {label}: {str(exc)[:260]}")
 
     # ------------------------------------------------------------------ TOOL
     print("== TOOL ==")
     tools = api.list_tools(agent, project)
-    origen = next((t for t in tools if t.get("openApiSpec")), None)
-    if origen:
-        cuerpo = {k: v for k, v in origen.items()
+    source = next((t for t in tools if t.get("openApiSpec")), None)
+    if source:
+        body = {k: v for k, v in source.items()
                   if k not in ("name", "displayName", "etag", "createTime", "updateTime")}
-        cuerpo["displayName"] = "zz_tmp_tool_probe"
-        cuerpo["description"] = "temporal - sonda de huecos"
+        body["displayName"] = "zz_tmp_tool_probe"
+        body["description"] = "temporary - gap probe"
         try:
-            nuevo = post(f"{api_base}/agents/{agent}/tools", cuerpo)
-            tool_name = nuevo.get("name", "")
+            new_tool = post(f"{api_base}/agents/{agent}/tools", body)
+            tool_name = new_tool.get("name", "")
             print("  temporary tool:", tool_name.rsplit("/", 1)[-1])
             if tool_name:
-                atexit.register(lambda: borrar(
+                atexit.register(lambda: delete(
                     f"{api_base}/agents/{agent}/tools/" + tool_name.rsplit("/", 1)[-1]))
 
                 def set_actionschemas(d, v):
                     d["actionSchemas"] = v
 
-                esquemas = [{"name": "probe_accion",
+                schemas = [{"name": "probe_action",
                              "inputParameters": [{"name": "q",
                                                   "schema": '{"type":"string"}'}],
                              "outputParameters": []}]
-                probar("Tool.actionSchemas", tool_name, set_actionschemas, "actionSchemas",
-                       "actionSchemas", esquemas)
+                test_field("Tool.actionSchemas", tool_name, set_actionschemas, "actionSchemas",
+                            "actionSchemas", schemas)
         except Exception as exc:
             print("  [ERR] the temporary tool could not be created:", str(exc)[:300])
 
@@ -111,9 +111,9 @@ def main() -> int:
             d["entities"][0]["dtmfPattern"] = v
 
         if et_name:
-            atexit.register(lambda: borrar(
+            atexit.register(lambda: delete(
                 f"{api_base}/agents/{agent}/entityTypes/" + et_name.rsplit("/", 1)[-1]))
-            probar("EntityType.entities[0].dtmfPattern", et_name, set_dtmf, "entities",
+            test_field("EntityType.entities[0].dtmfPattern", et_name, set_dtmf, "entities",
                    "entities.dtmfPattern", "9")
     except Exception as exc:
         print("  [ERR] entityType:", str(exc)[:300])
@@ -131,9 +131,9 @@ def main() -> int:
             d["trainingPhrases"][0]["parts"][0]["auto"] = v
 
         if intent_name:
-            atexit.register(lambda: borrar(
+            atexit.register(lambda: delete(
                 f"{api_base}/agents/{agent}/intents/" + intent_name.rsplit("/", 1)[-1]))
-            probar("Intent.trainingPhrases[0].parts[0].auto", intent_name, set_auto,
+            test_field("Intent.trainingPhrases[0].parts[0].auto", intent_name, set_auto,
                    "trainingPhrases", "trainingPhrases.parts.auto", False)
     except Exception as exc:
         print("  [ERR] intent:", str(exc)[:300])
@@ -144,26 +144,26 @@ def main() -> int:
     def set_webclient(d, v):
         d["webClientSettings"] = v
 
-    probar("Agent.webClientSettings.boxBorderRadius", base, set_webclient,
+    test_field("Agent.webClientSettings.boxBorderRadius", base, set_webclient,
            "webClientSettings", "webClientSettings.boxBorderRadius", "8")
 
     def set_playback(d, v):
         d.setdefault("advancedSettings", {})["playbackInterruptionSettings"] = v
 
-    probar("Agent.advancedSettings.playbackInterruptionSettings", base, set_playback,
+    test_field("Agent.advancedSettings.playbackInterruptionSettings", base, set_playback,
            "advancedSettings", "advancedSettings.playbackInterruptionSettings",
            {"allowPlaybackInterruption": False})
 
     def set_smartendpoint(d, v):
         d.setdefault("advancedSettings", {}).setdefault("speechSettings", {})["enableSmartEndpointing"] = v
 
-    probar("Agent.advancedSettings.speechSettings.enableSmartEndpointing", base,
+    test_field("Agent.advancedSettings.speechSettings.enableSmartEndpointing", base,
            set_smartendpoint, "advancedSettings",
            "advancedSettings.speechSettings.enableSmartEndpointing", False)
 
     print("\n== SUMMARY ==")
-    for etiqueta, ok, det in RESULTADOS:
-        print(f"  {'OK ' if ok else 'NO '} {etiqueta:<58} {det}")
+    for label, ok, det in RESULTS:
+        print(f"  {'OK ' if ok else 'NO '} {label:<58} {det}")
     return 0
 
 

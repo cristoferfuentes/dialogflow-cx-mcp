@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import targets_de_sonda
+from _entorno import probe_targets
 
 from cxp.config import load_config
 
@@ -26,14 +26,14 @@ from cxp.config import load_config
 SECRETOS = ("cookie", "authorization", "x-goog-api-key", "proxy-authorization")
 
 
-def redacta(headers: dict[str, str]) -> dict[str, str]:
+def redact(headers: dict[str, str]) -> dict[str, str]:
     """Copy of the headers with the credential values replaced."""
     return {k: ("<redacted>" if k.lower() in SECRETOS else v)
             for k, v in headers.items()}
 
 # The target (agent, flow, page) comes from the environment:
-#   CXP_PROBE_TARGETS="por_defecto=agent,flow,page"
-TARGET = next(iter(targets_de_sonda().values()), {"agent": "", "flow": "", "page": ""})
+#   CXP_PROBE_TARGETS="default=agent,flow,page"
+TARGET = next(iter(probe_targets().values()), {"agent": "", "flow": "", "page": ""})
 URL = (
     "https://conversational-agents.cloud.google.com/projects/{p}/locations/global"
     f"/agents/{TARGET['agent']}/(cx/flows/{TARGET['flow']}/flow_creation//right-panel:simulator)"
@@ -74,9 +74,9 @@ def main() -> int:
     if flows:
         f = flows[-1]
         # The credentials are redacted: they are printed and written below.
-        out["sample_flow_request"] = {**f, "headers": redacta(f["headers"])}
+        out["sample_flow_request"] = {**f, "headers": redact(f["headers"])}
         print("\n== FULL HEADERS of the flows request:")
-        for k, v in sorted(redacta(f["headers"]).items()):
+        for k, v in sorted(redact(f["headers"]).items()):
             print(f"   {k}: {v[:160]}")
         print(f"\n== url: {f['url']}")
 
@@ -101,10 +101,10 @@ def main() -> int:
             print(f"\n== replay failed: {type(exc).__name__}: {exc}")
             out["replay_in_page"] = {"error": str(exc)}
 
-    destino = Path("/tmp/full_headers.json")
-    destino.write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
+    dest = Path("/tmp/full_headers.json")
+    dest.write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
     # 0600: the file belongs to the user who ran the probe, nobody else.
-    destino.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    dest.chmod(stat.S_IRUSR | stat.S_IWUSR)
     print("\n== written /tmp/full_headers.json (0600, credentials redacted)")
     return 0
 

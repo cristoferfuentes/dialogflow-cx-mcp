@@ -112,7 +112,7 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
    Back up the file before editing it and keep its other servers intact.
 
 6) VERIFY (do not declare success before this passes)
-   cd <repo> && .venv/bin/python -c "import sys; sys.path.insert(0,'.'); import server; r=server.cx_status(); print(r.get('credenciales_ok'), r.get('sesion_aceptada')); print(r.get('permisos')); print(r.get('error'))"
+   cd <repo> && .venv/bin/python -c "import sys; sys.path.insert(0,'.'); import server; r=server.cx_status(); print(r.get('credentials_ok'), r.get('session_accepted')); print(r.get('permissions')); print(r.get('error'))"
    It must print True True and the permission table.
    - If it prints 401: the cookie jar is incomplete -> repeat step 3 with the WHOLE
      header.

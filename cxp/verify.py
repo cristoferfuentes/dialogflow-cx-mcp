@@ -72,7 +72,7 @@ def verify_route_target(
     flow_id: str,
     parameters: dict,
     text_turn0: str = "hola",
-    text_turn1: str = "xyzzy condicion imposible de fulfill 4711",
+    text_turn1: str = "xyzzy impossible condition to fulfill 4711",
     timeout: float = 300.0,
 ) -> dict:
     """Run 2 turns and look for DEST=playbooks/... in the trace."""
@@ -98,15 +98,15 @@ def verify_route_target(
 
     return {
         "session_id": session_id,
-        "contexto_llego": params_ok,
-        "match_turno_0": (qr0.get("match") or {}).get("matchType"),
-        "match_turno_1": (qr1.get("match") or {}).get("matchType"),
+        "context_arrived": params_ok,
+        "match_turn_0": (qr0.get("match") or {}).get("matchType"),
+        "match_turn_1": (qr1.get("match") or {}).get("matchType"),
         "current_playbooks": (qr1.get("generativeInfo") or {}).get("currentPlaybooks"),
-        "destinos_playbook": dests[:10],
-        "transiciones": transitions[:10],
-        "playbooks_en_traza": playbooks[:10],
-        "llego_a_playbook": bool(dests),
-        "nota": "si `llego_a_playbook` es False, la ruta todavia no tiene destino a playbook",
+        "playbook_destinations": dests[:10],
+        "transitions": transitions[:10],
+        "playbooks_in_trace": playbooks[:10],
+        "reached_playbook": bool(dests),
+        "note": "if `reached_playbook` is False, the route still has no playbook target",
     }
 
 

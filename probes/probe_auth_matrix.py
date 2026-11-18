@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agente
+from _entorno import agent
 
 from cxp.config import load_config
 from cxp.httpclient import Session
@@ -25,7 +25,7 @@ from cxp.httpclient import Session
 # The console API key is read from the environment (`CXP_API_KEY`); it is never hardwired.
 API_KEY = os.environ.get("CXP_API_KEY", "")
 ORIGIN = "https://conversational-agents.cloud.google.com"
-CLON = agente("por_defecto")
+CLON = agent("default")
 def main() -> int:
     cfg = load_config()
     state = json.loads(cfg.state_file.read_text(encoding="utf-8"))
@@ -58,27 +58,27 @@ def main() -> int:
         f"/locations/global/agents/{CLON}/flows?key={API_KEY}"
     )
 
-    variantes = {
-        "1 cookies-todas + SAPISIDHASH simple": {
+    variants = {
+        "1 all cookies + simple SAPISIDHASH": {
             **base_headers,
             "Authorization": f"SAPISIDHASH {one}",
             "Cookie": all_ck,
         },
-        "2 cookies-todas + triple hash": {
+        "2 all cookies + triple hash": {
             **base_headers,
             "Authorization": triple,
             "Cookie": all_ck,
         },
-        "3 cookies-nucleo + triple hash": {
+        "3 core cookies + triple hash": {
             **base_headers,
             "Authorization": triple,
             "Cookie": core,
         },
-        "4 solo cookies (sin Authorization)": {
+        "4 cookies only (no Authorization)": {
             **base_headers,
             "Cookie": all_ck,
         },
-        "5 solo cookies + X-Goog-AuthUser": {
+        "5 cookies only + X-Goog-AuthUser": {
             **base_headers,
             "Cookie": all_ck,
             "X-Goog-AuthUser": "0",
@@ -93,9 +93,9 @@ def main() -> int:
     }
 
     http = Session(timeout=60.0, maxseg=cfg.tcp_maxseg, retries=1)
-    for nombre, hdr in variantes.items():
+    for name, headers in variants.items():
         try:
-            status, text = http.request("GET", url, hdr)
+            status, text = http.request("GET", url, headers)
             snippet = ""
             if status == 200:
                 try:
@@ -105,9 +105,9 @@ def main() -> int:
                     snippet = text[:80]
             else:
                 snippet = " ".join(text.split())[:160]
-            print(f"== {nombre}: HTTP {status}  {snippet}", flush=True)
+            print(f"== {name}: HTTP {status}  {snippet}", flush=True)
         except Exception as exc:
-            print(f"== {nombre}: {type(exc).__name__}: {exc}", flush=True)
+            print(f"== {name}: {type(exc).__name__}: {exc}", flush=True)
     return 0
 
 

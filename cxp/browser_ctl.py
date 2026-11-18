@@ -32,7 +32,7 @@ def ctl_status(br: ConsoleBrowser) -> dict:
     out: dict[str, Any] = {}
     try:
         out["url"] = page.url
-        out["titulo"] = page.title()
+        out["title"] = page.title()
         out["ua"] = page.evaluate("navigator.userAgent")
         out["secure_context"] = page.evaluate("window.isSecureContext")
     except Exception as exc:
@@ -57,7 +57,7 @@ def ctl_open(br: ConsoleBrowser, url: str, wait_ms: int = 3000) -> dict:
         return {"ok": False, "error": f"goto: {type(exc).__name__}: {exc}", "url": page.url}
     if wait_ms:
         page.wait_for_timeout(wait_ms)
-    return {"ok": True, "url": page.url, "titulo": page.title()}
+    return {"ok": True, "url": page.url, "title": page.title()}
 
 
 def ctl_text(br: ConsoleBrowser, selector: str = "body", limit: int = 6000) -> dict:
@@ -70,65 +70,65 @@ def ctl_text(br: ConsoleBrowser, selector: str = "body", limit: int = 6000) -> d
             txt = "\n".join(t for t in loc.all_inner_texts())
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    return {"ok": True, "selector": selector, "texto": txt[:limit], "largo": len(txt)}
+    return {"ok": True, "selector": selector, "text": txt[:limit], "length": len(txt)}
 
 
-def ctl_click(br: ConsoleBrowser, selector: str = "", texto: str = "", nth: int = 0,
+def ctl_click(br: ConsoleBrowser, selector: str = "", text: str = "", nth: int = 0,
               timeout: float = 15.0) -> dict:
     """Click an element by selector CSS or by visible text."""
     page = _page(br)
     loc = None
-    if texto:
-        loc = page.get_by_text(texto, exact=False)
+    if text:
+        loc = page.get_by_text(text, exact=False)
     elif selector:
         loc = page.locator(selector)
     else:
-        return {"ok": False, "error": "indica selector= o texto="}
+        return {"ok": False, "error": "indicate selector= or text="}
     try:
         n = loc.count()
     except Exception as exc:
         return {"ok": False, "error": f"count: {type(exc).__name__}: {exc}"}
     if n == 0:
-        return {"ok": False, "error": "no se encontro el elemento", "coincidencias": 0}
+        return {"ok": False, "error": "the element was not found", "matches": 0}
     idx = min(max(nth, 0), n - 1)
     try:
         target = loc.nth(idx)
         target.scroll_into_view_if_needed(timeout=timeout * 1000)
         target.click(timeout=timeout * 1000)
     except Exception as exc:
-        return {"ok": False, "error": f"click: {type(exc).__name__}: {exc}", "coincidencias": n}
+        return {"ok": False, "error": f"click: {type(exc).__name__}: {exc}", "matches": n}
     page.wait_for_timeout(800)
-    return {"ok": True, "coincidencias": n, "pulsado_indice": idx, "url": page.url}
+    return {"ok": True, "matches": n, "clicked_index": idx, "url": page.url}
 
 
-def ctl_fill(br: ConsoleBrowser, selector: str, valor: str, timeout: float = 15.0) -> dict:
+def ctl_fill(br: ConsoleBrowser, selector: str, value: str, timeout: float = 15.0) -> dict:
     page = _page(br)
     try:
         loc = page.locator(selector).first
-        loc.fill(valor, timeout=timeout * 1000)
+        loc.fill(value, timeout=timeout * 1000)
     except Exception as exc:
         return {"ok": False, "error": f"fill: {type(exc).__name__}: {exc}"}
     return {"ok": True, "selector": selector}
 
 
-def ctl_press(br: ConsoleBrowser, tecla: str = "Enter") -> dict:
+def ctl_press(br: ConsoleBrowser, key: str = "Enter") -> dict:
     page = _page(br)
     try:
-        page.keyboard.press(tecla)
+        page.keyboard.press(key)
     except Exception as exc:
         return {"ok": False, "error": f"press: {type(exc).__name__}: {exc}"}
     page.wait_for_timeout(500)
-    return {"ok": True, "tecla": tecla}
+    return {"ok": True, "key": key}
 
 
-def ctl_screenshot(br: ConsoleBrowser, ruta: str = "/tmp/cx-playbook-consola.png",
+def ctl_screenshot(br: ConsoleBrowser, path: str = "/tmp/cx-playbook-console.png",
                    full_page: bool = True) -> dict:
     page = _page(br)
     try:
-        page.screenshot(path=ruta, full_page=full_page)
+        page.screenshot(path=path, full_page=full_page)
     except Exception as exc:
         return {"ok": False, "error": f"screenshot: {type(exc).__name__}: {exc}"}
-    return {"ok": True, "ruta": ruta, "url": page.url}
+    return {"ok": True, "path": path, "url": page.url}
 
 
 def ctl_eval(br: ConsoleBrowser, js: str) -> dict:
@@ -146,7 +146,7 @@ def ctl_requests(br: ConsoleBrowser) -> dict:
     return {
         "ok": True,
         "n": len(reqs),
-        "peticiones": [
+        "requests": [
             {
                 "method": r.get("method"),
                 "url": r.get("url"),
@@ -169,7 +169,7 @@ def ctl_wait(br: ConsoleBrowser, ms: int = 2000) -> dict:
 
 
 # --------------------------------------------------------------------- dispatch
-ACCIONES = {
+ACTIONS = {
     "status": ctl_status,
     "open": ctl_open,
     "text": ctl_text,
@@ -183,25 +183,25 @@ ACCIONES = {
 }
 
 
-def dispatch(br: ConsoleBrowser, accion: str, **kw) -> dict:
-    fn = ACCIONES.get(accion)
+def dispatch(br: ConsoleBrowser, action: str, **kw) -> dict:
+    fn = ACTIONS.get(action)
     if fn is None:
         return {
             "ok": False,
-            "error": f"accion desconocida: {accion}",
-            "acciones": sorted(ACCIONES),
+            "error": f"unknown action: {action}",
+            "actions": sorted(ACTIONS),
         }
     try:
         return fn(br, **kw)
     except TypeError as exc:
-        return {"ok": False, "error": f"argumentos invalidos para '{accion}': {exc}",
-                "acciones": sorted(ACCIONES)}
+        return {"ok": False, "error": f"invalid arguments for '{action}': {exc}",
+                "actions": sorted(ACTIONS)}
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 # --------------------------------------------------------------- recipes UI
-def list_selectors(br: ConsoleBrowser, limite: int = 120) -> dict:
+def list_selectors(br: ConsoleBrowser, limit: int = 120) -> dict:
     """List the interactive elements of the page (to refine selectors)."""
     page = _page(br)
     js = """
@@ -214,12 +214,12 @@ def list_selectors(br: ConsoleBrowser, limite: int = 120) -> dict:
         const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
         if (!t || t.length > 120) return;
         out.push({tag: el.tagName.toLowerCase(), cls: (el.className || '').toString().slice(0, 80),
-                  role: el.getAttribute('role') || '', texto: t.slice(0, 90),
+                  role: el.getAttribute('role') || '', text: t.slice(0, 90),
                   visible: !!(el.offsetParent || el.getClientRects().length)});
       });
-      return out.slice(0, __LIMITE__);
+      return out.slice(0, __LIMIT__);
     }
-    """.replace("__LIMITE__", str(limite))
+    """.replace("__LIMIT__", str(limit))
     try:
         items = page.evaluate(js)
     except Exception as exc:
@@ -227,21 +227,21 @@ def list_selectors(br: ConsoleBrowser, limite: int = 120) -> dict:
     return {"ok": True, "n": len(items), "elementos": items}
 
 
-def wait_for_text(br: ConsoleBrowser, texto: str, timeout_s: float = 30.0) -> dict:
+def wait_for_text(br: ConsoleBrowser, text: str, timeout_s: float = 30.0) -> dict:
     """Wait for text to appear on the page."""
     page = _page(br)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            loc = page.get_by_text(texto, exact=False)
+            loc = page.get_by_text(text, exact=False)
             if loc.count() > 0:
                 try:
                     vis = any(loc.nth(i).is_visible() for i in range(min(loc.count(), 5)))
                 except Exception:
                     vis = True
                 if vis:
-                    return {"ok": True, "encontrado": texto, "url": page.url}
+                    return {"ok": True, "found": text, "url": page.url}
         except Exception:
             pass
         page.wait_for_timeout(700)
-    return {"ok": False, "error": f"timeout esperando '{texto}'", "url": page.url}
+    return {"ok": False, "error": f"timeout waiting for '{text}'", "url": page.url}

@@ -9,13 +9,13 @@ Saves, for every request to the internal backend:
   * method, URL and query
   * the BODY of the request (postData)
 
-Afterwards, `probes/analiza_trafico_consola.py` compares them with the discovery doc:
+Afterwards, `probes/analyze_console_traffic.py` compares them with the discovery doc:
   * endpoints the console calls and the discovery doc does NOT declare
   * body fields the public proto does NOT declare
 
 Usage:
-    CXP_PROBE_TARGETS="por_defecto=<agent>,<flow>,<page>" \\
-        .venv/bin/python probes/captura_trafico_consola.py --out /tmp/trafico.json
+    CXP_PROBE_TARGETS="default=<agent>,<flow>,<page>" \\
+        .venv/bin/python probes/capture_console_traffic_cdp.py --out /tmp/console_traffic.json
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import targets_de_sonda
-from _redact import escribe_json_privado
+from _entorno import probe_targets
+from _redact import write_json_private
 
 from cxp.chrome_cdp import RealChrome
 from cxp.config import load_config
@@ -42,19 +42,19 @@ CONSOLE_URL = (
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="/tmp/trafico_consola.json")
+    ap.add_argument("--out", default="/tmp/console_traffic.json")
     ap.add_argument("--wait", type=int, default=25000)
     ap.add_argument("--url", default="")
     args = ap.parse_args()
 
     cfg = load_config()
-    objetivos = targets_de_sonda()
-    if not objetivos:
+    targets = probe_targets()
+    if not targets:
         print('no targets: set CXP_PROBE_TARGETS="name=<agent>,<flow>,<page>"')
         return 1
-    objetivo = next(iter(objetivos.values()))
-    agente = objetivo["agent"]
-    url = args.url or CONSOLE_URL.format(p=cfg.project, l=cfg.location, a=agente)
+    target = next(iter(targets.values()))
+    agent = target["agent"]
+    url = args.url or CONSOLE_URL.format(p=cfg.project, l=cfg.location, a=agent)
     print("URL:", url)
 
     chrome = RealChrome(display=cfg.display, profile_dir=cfg.real_profile_dir,
@@ -64,7 +64,7 @@ def main() -> int:
     ctx = page.context
     print("chrome opened; waiting", args.wait, "ms")
 
-    peticiones: list[dict] = []
+    requests: list[dict] = []
 
     def _on_request(ev):
         req = ev.get("request") or {}
@@ -75,30 +75,30 @@ def main() -> int:
         post = req.get("postData")
         if isinstance(post, dict):
             post = post.get("text")
-        peticiones.append({
-            "metodo": req.get("method"),
-            "ruta": p.path,
+        requests.append({
+            "method": req.get("method"),
+            "route": p.path,
             "query": p.query,
             "url": u,
-            "cuerpo": post,
-            "cabeceras": req.get("headers") or {},
+            "body": post,
+            "headers": req.get("headers") or {},
         })
 
     # One CDP session per frame: the /cx/ iframe goes on its own.
-    sesiones = []
+    sessions = []
     for frame in list(page.frames):
         try:
             s = ctx.new_cdp_session(frame)
             s.send("Network.enable")
             s.on("Network.requestWillBeSent", _on_request)
-            sesiones.append(s)
+            sessions.append(s)
         except Exception as exc:
             print("  frame without session:", exc)
     try:
         s = ctx.new_cdp_session(page)
         s.send("Network.enable")
         s.on("Network.requestWillBeSent", _on_request)
-        sesiones.append(s)
+        sessions.append(s)
     except Exception as exc:
         print("  page without session:", exc)
 
@@ -111,10 +111,10 @@ def main() -> int:
         print("could not reload:", exc)
     time.sleep(args.wait / 1000)
 
-    escribe_json_privado(args.out, peticiones)
-    print(f"backend requests captured: {len(peticiones)} -> {args.out}")
-    for p in peticiones[:40]:
-        print(f"  {p['metodo']:<6} {p['ruta']}")
+    write_json_private(args.out, requests)
+    print(f"backend requests captured: {len(requests)} -> {args.out}")
+    for p in requests[:40]:
+        print(f"  {p['method']:<6} {p['route']}")
 
     try:
         chrome.close()

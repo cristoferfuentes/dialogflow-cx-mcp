@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 #: Headers whose value is a credential.
-CABECERAS_SECRETAS = (
+SECRET_HEADERS = (
     "cookie",
     "authorization",
     "x-goog-api-key",
@@ -32,7 +32,7 @@ CABECERAS_SECRETAS = (
 )
 
 #: Keys of a captured request that hold the credentials.
-CLAVES_SECRETAS = (
+SECRET_KEYS = (
     "cookie",
     "authorization",
     "sapisisid",
@@ -40,48 +40,48 @@ CLAVES_SECRETAS = (
     "session_state",
 )
 
-REDACTADO = "<redacted>"
+REDACTED = "<redacted>"
 
 
-def es_secreto(clave: str) -> bool:
+def is_secret(key: str) -> bool:
     """Whether a header/key name holds a credential."""
-    k = (clave or "").lower()
-    return k in CABECERAS_SECRETAS or k in CLAVES_SECRETAS
+    k = (key or "").lower()
+    return k in SECRET_HEADERS or k in SECRET_KEYS
 
 
-def redacta_headers(headers: dict[str, Any]) -> dict[str, Any]:
+def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
     """Copy of a headers dict with the credential values replaced."""
-    return {k: (REDACTADO if es_secreto(k) else v) for k, v in headers.items()}
+    return {k: (REDACTED if is_secret(k) else v) for k, v in headers.items()}
 
 
-def redacta(objeto: Any) -> Any:
+def redact(obj: Any) -> Any:
     """Recursive redaction of every credential found in a JSON-ish structure."""
-    if isinstance(objeto, dict):
-        return {k: (REDACTADO if es_secreto(k) else redacta(v))
-                for k, v in objeto.items()}
-    if isinstance(objeto, list):
-        return [redacta(v) for v in objeto]
-    return objeto
+    if isinstance(obj, dict):
+        return {k: (REDACTED if is_secret(k) else redact(v))
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact(v) for v in obj]
+    return obj
 
 
-def escribe_privado(destino: str | Path, texto: str) -> Path:
+def write_private(dest: str | Path, text: str) -> Path:
     """Write a file that only its owner can read (0600)."""
-    p = Path(destino)
-    p.write_text(texto, encoding="utf-8")
+    p = Path(dest)
+    p.write_text(text, encoding="utf-8")
     p.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return p
 
 
-def escribe_json_privado(destino: str | Path, objeto: Any,
-                         *, redactar: bool = True) -> Path:
+def write_json_private(dest: str | Path, obj: Any,
+                       *, redact_secrets: bool = True) -> Path:
     """Write a JSON file (0600), redacting the credentials by default."""
-    datos = redacta(objeto) if redactar else objeto
-    return escribe_privado(destino, json.dumps(datos, indent=1, ensure_ascii=False))
+    data = redact(obj) if redact_secrets else obj
+    return write_private(dest, json.dumps(data, indent=1, ensure_ascii=False))
 
 
-def asegura_privado(destino: str | Path) -> None:
+def ensure_private(dest: str | Path) -> None:
     """Make an existing file readable only by its owner."""
     try:
-        os.chmod(destino, stat.S_IRUSR | stat.S_IWUSR)
+        os.chmod(dest, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass

@@ -87,8 +87,8 @@ class ConsoleBrowser:
         self._real = None
         self._browser = None
         # User-Agent. Google REJECTS account login in headless browsers
-        # ("No puedes acceder: es posible que no sean seguros este
-        # navegador o la app" -> /v3/signin/rejected) because its UA says
+        # ("You can't access this: it may be that this browser or the app
+        # is not secure" -> /v3/signin/rejected) because its UA says
         # "HeadlessChrome". A desktop Chrome UA is presented.
         # (The session is the user's own, on their own machine.)
         self.user_agent = (
@@ -336,12 +336,12 @@ class ConsoleBrowser:
         try:
             url = self._page.url
         except Exception:
-            return False, "sin pagina", None
+            return False, "no page", None
         cookies = self.cookies()
         names = {c.get("name") for c in cookies}
         sapisid = pick_sapisid(cookies)
         if not sapisid and "SID" not in names:
-            return False, "sin cookies de sesion de Google (SID/__Secure-3PSID)", None
+            return False, "without Google session cookies (SID/__Secure-3PSID)", None
         if "accounts.google.com" in url:
             return False, "redirigido a accounts.google.com", None
         try:
@@ -349,7 +349,7 @@ class ConsoleBrowser:
         except Exception:
             title = ""
         if "sign in" in title or "iniciar sesión" in title:
-            return False, "titulo de login", None
+            return False, "login title", None
         email = self._page_email()
         return True, f"url={url} | cookies={sorted(names & {'SID', 'SAPISID', '__Secure-3PSID', 'HSID', 'SSID'})}", email
 
@@ -399,7 +399,7 @@ class ConsoleBrowser:
                 return SessionState(True, email, f"login completado: {reason}")
             time.sleep(2)
         self.close()
-        return SessionState(False, None, "timeout esperando el inicio de sesion")
+        return SessionState(False, None, "timeout waiting for the login to start")
 
     # ---------------------------------------------------------------- cookies
     def cookies(self) -> list[dict]:
@@ -415,7 +415,7 @@ class ConsoleBrowser:
         cookies = self.cookies()
         sapisid = pick_sapisid(cookies)
         if not sapisid:
-            raise RuntimeError("sin cookie SAPISID: la sesion de Google no esta activa")
+            raise RuntimeError("without the SAPISID cookie: the Google session is not active")
         headers = first_party_headers(self.cfg.console_origin, sapisid)
         extra = pick_google_cookies(cookies)
         if extra:

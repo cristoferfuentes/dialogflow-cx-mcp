@@ -19,35 +19,35 @@ with the exact symptom, the cause and the workaround.
 | id | what happens | workaround |
 |---|---|---|
 | `delete_force` | `DELETE` of a referenced resource -> 400 *"Please set 'force' to true"* | `force=true` on flows/tools/webhooks/entityTypes/generators/transitionRouteGroups (**not** on playbooks nor intents) -> delete in dependency order |
-| `escrituras_serializadas` | performance stalls: POST 1->1.57 · 2->1.01 · 3->1.03 · 4->1.34 · 6->1.14 · 8->1.12 ops/s | **create in series**; **deletion** does tolerate **2 in parallel** (+20 %) |
+| `serialized_writes` | performance stalls: POST 1->1.57 · 2->1.01 · 3->1.03 · 4->1.34 · 6->1.14 · 8->1.12 ops/s | **create in series**; **deletion** does tolerate **2 in parallel** (+20 %) |
 | `batch_404` | `/v3beta1/batch` -> **404** on the internal backend | `cx_batch` falls back to **threads**; never count on `/batch` |
-| `latencia_por_tamano` | +50 KB of body ≈ +600 ms | do not duplicate round-trips: verify **at the end**, not after each write |
-| `flow_ignora_pages` | `POST flow` ignores the `pages` in the body | one POST per page |
-| `destinos_validados` | 400 *"Target page … does not exist in the flow"* / *"Referenced resource X does not exist"* | create in dependency order; for cycles, create without routes and patch afterwards |
-| `ciclos_paginas` | in a page cycle the route cannot be validated when created | order the pages to break the cycles: **1 extra PATCH per page in the cycle** |
-| `rutas_en_el_post` | a flow created without routes and patched later = 2 writes | if **all** its routes are already resolvable, put them in the flow's `POST` |
+| `latency_by_size` | +50 KB of body ≈ +600 ms | do not duplicate round-trips: verify **at the end**, not after each write |
+| `flow_ignores_pages` | `POST flow` ignores the `pages` in the body | one POST per page |
+| `validated_destinations` | 400 *"Target page … does not exist in the flow"* / *"Referenced resource X does not exist"* | create in dependency order; for cycles, create without routes and patch afterwards |
+| `page_cycles` | in a page cycle the route cannot be validated when created | order the pages to break the cycles: **1 extra PATCH per page in the cycle** |
+| `routes_in_the_post` | a flow created without routes and patched later = 2 writes | if **all** its routes are already resolvable, put them in the flow's `POST` |
 | `end_flow` | the end-of-flow target is `.../flows/{flow}/pages/END_FLOW` | remap **every** `resource/id` pair of the name |
 | `playbook_loop` | 400 *"Playbook X caused loop in playbook routes"* | a self-referencing playbook cannot be created or updated through the API |
-| `macros_validadas` | the `${PLAYBOOK:x}`/`${FLOW:x}`/`${TOOL:x}` macros in the text are validated | create the playbooks in topological order |
-| `campos_solo_lectura` | `referencedFlows`/`referencedPlaybooks`/`inlineActions` are derived; `defaultLanguageCode` cannot be updated | do not send them when writing |
-| `campos_fuera_de_esquema` | a PATCH of a field the public API does not declare returns 200 and **the field is not there** | write against the internal backend and **verify by reading back** (`cx_set_console_field`) |
-| `patch_etag_obsoleto` | PATCH with the old `etag` -> **409** *"Others may have made recent changes…"* | remove the `etag` from the body (the console does not send it either) |
-| `ruta_sin_intent_ni_condition` | 400 *"At least one of intent or condition in transition route should be specified"* | always put `condition` or `intent` in the route |
-| `ruta_sin_destino` | 400 *"At least one of trigger fulfillment, target page, target flow, or target playbook…"* (in route groups) | give the group a target when creating it |
-| `subcampos_desconocidos` | writing `advancedSettings` empties its unknown subfields | they are read-only (`estado: derivado` in the catalogue) |
-| `action_schemas_derivadas` | writing `Tool.actionSchemas` changes nothing | read-only: change the `openApiSpec`, not the schemas |
-| `tipos_no_declarados_se_validan` | 400 *"Invalid value at 'agent.web_client_settings' (TYPE_STRING)"* | copy the value the resource already has and only change the type |
+| `validated_macros` | the `${PLAYBOOK:x}`/`${FLOW:x}`/`${TOOL:x}` macros in the text are validated | create the playbooks in topological order |
+| `read_only_fields` | `referencedFlows`/`referencedPlaybooks`/`inlineActions` are derived; `defaultLanguageCode` cannot be updated | do not send them when writing |
+| `fields_outside_the_schema` | a PATCH of a field the public API does not declare returns 200 and **the field is not there** | write against the internal backend and **verify by reading back** (`cx_set_console_field`) |
+| `stale_etag_patch` | PATCH with the old `etag` -> **409** *"Others may have made recent changes…"* | remove the `etag` from the body (the console does not send it either) |
+| `route_without_intent_nor_condition` | 400 *"At least one of intent or condition in transition route should be specified"* | always put `condition` or `intent` in the route |
+| `route_without_target` | 400 *"At least one of trigger fulfillment, target page, target flow, or target playbook…"* (in route groups) | give the group a target when creating it |
+| `unknown_subfields` | writing `advancedSettings` empties its unknown subfields | they are read-only (`status: derived` in the catalogue) |
+| `derived_action_schemas` | writing `Tool.actionSchemas` changes nothing | read-only: change the `openApiSpec`, not the schemas |
+| `undeclared_types_are_validated` | 400 *"Invalid value at 'agent.web_client_settings' (TYPE_STRING)"* | copy the value the resource already has and only change the type |
 | `tool_builtin` | `df-*` tools cannot be created or deleted | skip them (they exist in every agent) |
-| `tool_openapi_vacio` | 400 *"Null or empty definition"* (duplicated tools without `textSchema`) | recreate them **without** `openApiSpec` (documented deviation) |
-| `tool_datastore_borrado` | 400 *"Failed to connect datastores … do not exist"* | recreate **without** `dataStoreSpec` (documented deviation) |
-| `start_flow_protegido` | the `Default Start Flow` cannot be deleted nor emptied of its handlers | do not delete it: PATCH `transitionRoutes` and nothing else |
-| `guard_metodo_propio` | `agents/{id}:export` was rejected ("has no permission") | fixed in `cxp/guard.py` (the `:method` suffix is split off) |
-| `cookies_jar_incompleto` | with **only the 5 cookies** -> **401** *"Request had invalid authentication credentials"* | send the **complete** `.google.com` jar (23 cookies): `CXP_COOKIE` as-is |
-| `page_size_maximo_100` | `pageSize=200` -> **400** *"Page size should be within [0, 100]."* (on several endpoints; on `flows` 200 is fine) | ask for <=100: `cxp.gaps._listar()` retries only with 50, 20 and 5 |
-| `detect_intent_exige_language_code` | **400** *"Field 'query_input.language_code' is missing."* | the language goes in **`queryInput.languageCode`**, not in `queryInput.text.languageCode` (that form gives 400) |
-| `entorno_exige_todos_los_flows` | creating an environment -> 400 *"Flow 'X' … is not included in the environment"* (then *"Playbook 'P' … is not included"*) | publish a version of **each** flow and put them all in `versionConfigs` |
-| `test_cases_sin_delete` | `DELETE agents/{a}/testCases/{id}` -> **404** (the method does not exist) | `POST agents/{a}/testCases:batchDelete` with `{"names": [...]}` |
-| `endpoints_fuera_del_descriptor` | the UI shows data the public API **does not expose** (system entity types, who has access, which models exist…) | `cx_endpoints_consola` calls them; `cx_api` with `version=` and absolute paths reaches them |
+| `tool_openapi_empty` | 400 *"Null or empty definition"* (duplicated tools without `textSchema`) | recreate them **without** `openApiSpec` (documented deviation) |
+| `tool_datastore_deleted` | 400 *"Failed to connect datastores … do not exist"* | recreate **without** `dataStoreSpec` (documented deviation) |
+| `protected_start_flow` | the `Default Start Flow` cannot be deleted nor emptied of its handlers | do not delete it: PATCH `transitionRoutes` and nothing else |
+| `own_method_guard` | `agents/{id}:export` was rejected ("has no permission") | fixed in `cxp/guard.py` (the `:method` suffix is split off) |
+| `incomplete_cookie_jar` | with **only the 5 cookies** -> **401** *"Request had invalid authentication credentials"* | send the **complete** `.google.com` jar (23 cookies): `CXP_COOKIE` as-is |
+| `max_page_size_100` | `pageSize=200` -> **400** *"Page size should be within [0, 100]."* (on several endpoints; on `flows` 200 is fine) | ask for <=100: the listing helper in `cxp/gaps.py` retries only with 50, 20 and 5 |
+| `detect_intent_requires_language_code` | **400** *"Field 'query_input.language_code' is missing."* | the language goes in **`queryInput.languageCode`**, not in `queryInput.text.languageCode` (that form gives 400) |
+| `environment_requires_all_flows` | creating an environment -> 400 *"Flow 'X' … is not included in the environment"* (then *"Playbook 'P' … is not included"*) | publish a version of **each** flow and put them all in `versionConfigs` |
+| `test_cases_without_delete` | `DELETE agents/{a}/testCases/{id}` -> **404** (the method does not exist) | `POST agents/{a}/testCases:batchDelete` with `{"names": [...]}` |
+| `endpoints_outside_the_descriptor` | the UI shows data the public API **does not expose** (system entity types, who has access, which models exist…) | `cx_endpoints_consola` calls them; `cx_api` with `version=` and absolute paths reaches them |
 
 ---
 
@@ -123,7 +123,7 @@ The headers **do not change with the host**, except the `referer`:
 
 The MCP applies it on its own: the `referer` is derived from the host of the URL. To
 talk to another location, `cx_api(location="us-central1")` (or
-`cx_list_agents(todas_las_locations=True)`, which is what the console does).
+`cx_list_agents(all_locations=True)`, which is what the console does).
 
 ---
 

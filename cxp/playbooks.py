@@ -39,7 +39,7 @@ R6  **Self-reference** (`${PLAYBOOK:<itself>}`) is IMPOSSIBLE by API:
       * `guidelines` -> the macro moves to `instruction.guidelines` (only
         field not scanned): the text is preserved VERBATIM, but the macro stops
         being in `steps` (its functional position) and the
-        auto-arista is not recorded in `referencedPlaybooks` (readOnly).
+        self-reference is not recorded in `referencedPlaybooks` (readOnly).
       * `inert` -> the macro is neutralized in place (`${PLAYBOOK:x}` ->
         `{{PLAYBOOK:x}}`): keeps the position, loses the expansion.
       * `error` -> not created and both options are explained.
@@ -75,21 +75,21 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-# Resource macro: ${PLAYBOOK:nombre} | ${FLOW:nombre} | ${TOOL:nombre}
+# Resource macro: ${PLAYBOOK:name} | ${FLOW:name} | ${TOOL:name}
 MACRO_RE = re.compile(r"\$\{(PLAYBOOK|FLOW|TOOL):([^{}]+)\}")
 
 # Body fields that the backend SCANS (measured).
-CAMPOS_ESCANEADOS = ("goal", "steps")
+SCANNED_FIELDS = ("goal", "steps")
 # Fields the backend does NOT scan (measured): the escape hatch.
-CAMPOS_NO_ESCANEADOS = ("guidelines",)
+UNSCANNED_FIELDS = ("guidelines",)
 # Unknown status field: scanned as a precaution.
-CAMPOS_NO_MEDIDOS = ("codeBlock",)
+UNMEASURED_FIELDS = ("codeBlock",)
 
 # Policies for self-reference.
-POLITICAS_AUTOREF = ("error", "guidelines", "inert")
+SELF_REF_POLICIES = ("error", "guidelines", "inert")
 
 
-class ReglaNegocioError(ValueError):
+class BusinessRuleError(ValueError):
     """The request does not satisfy a CX business rule.
 
     The message is what the API would return (or its cause), so that the agent
@@ -102,12 +102,12 @@ class Macro:
 
     kind: str      # PLAYBOOK | FLOW | TOOL
     ref: str       # displayName (or id) referenced
-    campo: str     # goal | steps | guidelines | codeBlock
+    field: str     # goal | steps | guidelines | codeBlock
 
     @property
-    def escaneada(self) -> bool:
+    def scanned(self) -> bool:
         """Does the backend validate it on write?"""
-        return self.campo in CAMPOS_ESCANEADOS or self.campo in CAMPOS_NO_MEDIDOS
+        return self.field in SCANNED_FIELDS or self.field in UNMEASURED_FIELDS
 
     @property
     def token(self) -> str:
@@ -115,36 +115,36 @@ class Macro:
 
 
 # --------------------------------------------------------------------- macros
-def _macros_en_texto(texto: str, campo: str) -> list[Macro]:
-    return [Macro(kind=m.group(1), ref=m.group(2).strip(), campo=campo)
-            for m in MACRO_RE.finditer(texto or "")]
+def _macros_in_text(text: str, field: str) -> list[Macro]:
+    return [Macro(kind=m.group(1), ref=m.group(2).strip(), field=field)
+            for m in MACRO_RE.finditer(text or "")]
 
 
-def escanear_macros(goal: str = "", guidelines: str = "", steps: Iterable[Any] | None = None,
-                     code_block: Any = "") -> list[Macro]:
+def scan_macros(goal: str = "", guidelines: str = "", steps: Iterable[Any] | None = None,
+                 code_block: Any = "") -> list[Macro]:
     """All playbook macros, with the field where each one is.
 
     All three fields are scanned (the scanned ones, the one that is not and the unmeasured one)
     because the report has to be COMPLETE: even if `guidelines` does not
     validate it in the backend, the caller has to know there is a macro there."""
     out: list[Macro] = []
-    out += _macros_en_texto(goal or "", "goal")
-    out += _macros_en_texto(guidelines or "", "guidelines")
-    for paso in (steps or []):
-        texto = paso.get("text", "") if isinstance(paso, dict) else str(paso)
-        out += _macros_en_texto(texto, "steps")
+    out += _macros_in_text(goal or "", "goal")
+    out += _macros_in_text(guidelines or "", "guidelines")
+    for step in (steps or []):
+        text = step.get("text", "") if isinstance(step, dict) else str(step)
+        out += _macros_in_text(text, "steps")
     if isinstance(code_block, dict):
-        out += _macros_en_texto(code_block.get("code", ""), "codeBlock")
+        out += _macros_in_text(code_block.get("code", ""), "codeBlock")
     elif code_block:
-        out += _macros_en_texto(str(code_block), "codeBlock")
+        out += _macros_in_text(str(code_block), "codeBlock")
     return out
 
 
-def macros_de_tipo(macros: Iterable[Macro], kind: str) -> list[Macro]:
+def macros_of_type(macros: Iterable[Macro], kind: str) -> list[Macro]:
     return [m for m in macros if m.kind == kind]
 
 
-def macro_autoreferente(macros: Iterable[Macro], display_name: str) -> Macro | None:
+def self_referencing_macro(macros: Iterable[Macro], display_name: str) -> Macro | None:
     """The `${PLAYBOOK:<display_name>}` macro that points to itself."""
     for m in macros:
         if m.kind == "PLAYBOOK" and m.ref == display_name:
@@ -153,21 +153,21 @@ def macro_autoreferente(macros: Iterable[Macro], display_name: str) -> Macro | N
 
 
 # ---------------------------------------------------------------------- body
-def normalizar_steps(steps: Iterable[Any] | None) -> list[dict[str, Any]]:
-    """`["texto", ...]` -> `[{"text": "texto"}, ...]` (what the API expects)."""
+def normalize_steps(steps: Iterable[Any] | None) -> list[dict[str, Any]]:
+    """`["text", ...]` -> `[{"text": "text"}, ...]` (what the API expects)."""
     out: list[dict[str, Any]] = []
-    for paso in (steps or []):
-        if isinstance(paso, dict):
-            out.append(paso)
-        elif isinstance(paso, str):
-            out.append({"text": paso})
+    for step in (steps or []):
+        if isinstance(step, dict):
+            out.append(step)
+        elif isinstance(step, str):
+            out.append({"text": step})
         else:
-            raise ReglaNegocioError(
-                f"paso de playbook invalido: {paso!r} (usa un str o un dict)")
+            raise BusinessRuleError(
+                f"invalid playbook step: {step!r} (use a str or a dict)")
     return out
 
 
-def construir_cuerpo(display_name: str, goal: str, *,
+def build_body(display_name: str, goal: str, *,
                      guidelines: str = "", steps: Iterable[Any] | None = None,
                      code_block: Any = None, llm_model_settings: dict | None = None,
                      playbook_type: str = "", referenced_tools: Iterable[str] | None = None,
@@ -180,17 +180,17 @@ def construir_cuerpo(display_name: str, goal: str, *,
     display_name = (display_name or "").strip()
     goal = (goal or "").strip()
     if not display_name:
-        raise ReglaNegocioError(
-            "falta 'displayName': un playbook sin nombre no se puede direccionar")
+        raise BusinessRuleError(
+            "missing 'displayName': a playbook without a name cannot be addressed")
     if not goal:
-        raise ReglaNegocioError(
-            "falta 'goal': la API responde 'Playbook goal cannot be empty'")
+        raise BusinessRuleError(
+            "missing 'goal': the API answers 'Playbook goal cannot be empty'")
     body: dict[str, Any] = {
         "displayName": display_name,
         "goal": goal,
         "instruction": {
             "guidelines": guidelines or "",
-            "steps": normalizar_steps(steps),
+            "steps": normalize_steps(steps),
         },
     }
     if code_block:
@@ -209,109 +209,109 @@ def construir_cuerpo(display_name: str, goal: str, *,
 
 
 # ------------------------------------------------------- self-reference policy
-def _texto_sin_macro(texto: str, macro: Macro) -> str:
+def _text_without_macro(text: str, macro: Macro) -> str:
     """Remove the macro from the text (leave the rest intact)."""
     return MACRO_RE.sub(
         lambda m: "" if (m.group(1) == macro.kind and m.group(2).strip() == macro.ref)
-        else m.group(0), texto or "")
+        else m.group(0), text or "")
 
 
-def _texto_inerte(texto: str, macro: Macro) -> str:
+def _inert_text(text: str, macro: Macro) -> str:
     """Neutralize the macro: `${PLAYBOOK:x}` -> `{{PLAYBOOK:x}}` (inert token)."""
     return MACRO_RE.sub(
         lambda m: ("{{PLAYBOOK:" + m.group(2).strip() + "}}")
         if (m.group(1) == macro.kind and m.group(2).strip() == macro.ref)
-        else m.group(0), texto or "")
+        else m.group(0), text or "")
 
 
-def aplicar_politica_autorref(body: dict[str, Any], macros: list[Macro],
-                              display_name: str,
-                              politica: str = "error") -> tuple[dict[str, Any], list[str]]:
+def apply_self_ref_policy(body: dict[str, Any], macros: list[Macro],
+                          display_name: str,
+                          policy: str = "error") -> tuple[dict[str, Any], list[str]]:
     """Apply the self-reference policy. Return (body, notes).
 
-    `politica`:
-      * `error`      -> raises `ReglaNegocioError` explaining the two outputs.
+    `policy`:
+      * `error`      -> raises `BusinessRuleError` explaining the two outputs.
       * `guidelines` -> the macro moves to `instruction.guidelines` (the only
         field the backend does not scan): the text is preserved verbatim.
       * `inert`      -> the macro is neutralized in place (inert token)."""
-    if politica not in POLITICAS_AUTOREF:
-        raise ReglaNegocioError(
-            f"politica de autorreferencia desconocida: {politica!r} "
-            f"(una de: {', '.join(POLITICAS_AUTOREF)})")
-    propia = macro_autoreferente(macros, display_name)
-    if propia is None:
+    if policy not in SELF_REF_POLICIES:
+        raise BusinessRuleError(
+            f"unknown self-reference policy: {policy!r} "
+            f"(one of: {', '.join(SELF_REF_POLICIES)})")
+    own = self_referencing_macro(macros, display_name)
+    if own is None:
         return body, []
 
-    if politica == "error":
-        raise ReglaNegocioError(
-            f"el playbook se referencia a si mismo ({propia.token} en "
-            f"'{propia.campo}'): la API lo rechaza con 'caused loop in "
-            "playbook routes' (esa comprobacion se ejecuta SIEMPRE, tambien "
-            "con updateMask=instruction.steps). Salidas: "
-            "self_reference='guidelines' (la macro se mueve a "
-            "instruction.guidelines, el unico campo que no se escanea: el "
-            "texto se conserva pero deja de estar en su posicion funcional) "
-            "o self_reference='inert' (se neutraliza a {{PLAYBOOK:x}}, se "
-            "conserva la posicion pero la macro deja de expandirse). En "
-            "ningun caso se puede registrar la auto-arista en "
-            "referencedPlaybooks: ese campo es de solo lectura.")
+    if policy == "error":
+        raise BusinessRuleError(
+            f"the playbook references itself ({own.token} in "
+            f"'{own.field}'): the API rejects it with 'caused loop in "
+            "playbook routes' (that check ALWAYS runs, also "
+            "with updateMask=instruction.steps). Options: "
+            "self_reference='guidelines' (the macro moves to "
+            "instruction.guidelines, the only field that is not scanned: the "
+            "text is preserved but it stops being in its functional position) "
+            "or self_reference='inert' (it is neutralized to {{PLAYBOOK:x}}, "
+            "the position is preserved but the macro stops expanding). In "
+            "no case can the self-reference be registered in "
+            "referencedPlaybooks: that field is read-only.")
 
-    nuevo = dict(body)
-    instr = dict(nuevo.get("instruction") or {})
-    notas: list[str] = []
+    new_body = dict(body)
+    instr = dict(new_body.get("instruction") or {})
+    notes: list[str] = []
 
-    if politica == "inert":
-        if propia.campo == "goal":
-            nuevo["goal"] = _texto_inerte(nuevo.get("goal", ""), propia)
-        elif propia.campo == "steps":
-            nuevo["instruction"] = instr
-            instr["steps"] = [_texto_inerte(p.get("text", ""), propia)
-                              if isinstance(p, dict) else _texto_inerte(str(p), propia)
+    if policy == "inert":
+        if own.field == "goal":
+            new_body["goal"] = _inert_text(new_body.get("goal", ""), own)
+        elif own.field == "steps":
+            new_body["instruction"] = instr
+            instr["steps"] = [_inert_text(p.get("text", ""), own)
+                              if isinstance(p, dict) else _inert_text(str(p), own)
                               for p in (instr.get("steps") or [])]
-        elif propia.campo == "guidelines":
-            instr["guidelines"] = _texto_inerte(instr.get("guidelines", ""), propia)
-            nuevo["instruction"] = instr
-        elif propia.campo == "codeBlock":
-            cb = dict(nuevo.get("codeBlock") or {})
-            cb["code"] = _texto_inerte(cb.get("code", ""), propia)
-            nuevo["codeBlock"] = cb
-        notas.append(
-            f"autorreferencia neutralizada en '{propia.campo}' ({propia.token} -> "
-            "{{PLAYBOOK:x}}): el texto conserva la posicion pero la macro deja "
-            "de expandirse en runtime")
-        return nuevo, notas
+        elif own.field == "guidelines":
+            instr["guidelines"] = _inert_text(instr.get("guidelines", ""), own)
+            new_body["instruction"] = instr
+        elif own.field == "codeBlock":
+            cb = dict(new_body.get("codeBlock") or {})
+            cb["code"] = _inert_text(cb.get("code", ""), own)
+            new_body["codeBlock"] = cb
+        notes.append(
+            f"self-reference neutralized in '{own.field}' ({own.token} -> "
+            "{{PLAYBOOK:x}}): the text keeps its position but the macro stops "
+            "expanding at runtime")
+        return new_body, notes
 
     # policy == "guidelines"
-    movida = propia.token
-    if propia.campo == "goal":
-        nuevo["goal"] = _texto_sin_macro(nuevo.get("goal", ""), propia)
-    elif propia.campo == "steps":
-        instr["steps"] = [_texto_sin_macro(p.get("text", ""), propia)
-                          if isinstance(p, dict) else _texto_sin_macro(str(p), propia)
+    moved = own.token
+    if own.field == "goal":
+        new_body["goal"] = _text_without_macro(new_body.get("goal", ""), own)
+    elif own.field == "steps":
+        instr["steps"] = [_text_without_macro(p.get("text", ""), own)
+                          if isinstance(p, dict) else _text_without_macro(str(p), own)
                           for p in (instr.get("steps") or [])]
-    elif propia.campo == "codeBlock":
-        cb = dict(nuevo.get("codeBlock") or {})
-        cb["code"] = _texto_sin_macro(cb.get("code", ""), propia)
-        nuevo["codeBlock"] = cb
+    elif own.field == "codeBlock":
+        cb = dict(new_body.get("codeBlock") or {})
+        cb["code"] = _text_without_macro(cb.get("code", ""), own)
+        new_body["codeBlock"] = cb
     # `guidelines` is not scanned: the macro can stay there as is.
-    guia = instr.get("guidelines") or ""
-    if propia.campo == "guidelines":
+    guide = instr.get("guidelines") or ""
+    if own.field == "guidelines":
         pass                      # it was already there: there is nothing to move
     else:
-        guia = (guia + "\n" + movida).strip() if guia else movida
-    instr["guidelines"] = guia
-    nuevo["instruction"] = instr
-    notas.append(
-        f"autorreferencia movida de '{propia.campo}' a 'instruction.guidelines' "
-        f"({movida} conservado verbatim): es el unico campo que el backend no "
-        "escanea, asi que el POST no ve el bucle. Desviaciones: la macro deja "
-        "de estar en su posicion funcional (steps) y la auto-arista no se "
-        "registra en referencedPlaybooks (readOnly)")
-    return nuevo, notas
+        guide = (guide + "\n" + moved).strip() if guide else moved
+    instr["guidelines"] = guide
+    new_body["instruction"] = instr
+    notes.append(
+        f"self-reference moved from '{own.field}' to 'instruction.guidelines' "
+        f"({moved} preserved verbatim): it is the only field the backend does "
+        "not scan, so the POST does not see the loop. Deviations: the macro "
+        "stops being in its functional position (steps) and the self-reference "
+        "is not registered in referencedPlaybooks (readOnly)")
+    return new_body, notes
 
 
 # ------------------------------------------------------------------ resolution
-class Resolvedor:
+class Resolver:
     """Resolve `displayName` -> agent resource ids (with cache).
 
     It is the only piece that needs network; it is injected so the rest of the
@@ -320,11 +320,11 @@ class Resolvedor:
     def __init__(self, playbook: Callable[[str], str | None],
                  flow: Callable[[str], str | None],
                  tool: Callable[[str], str | None],
-                 nombre_recurso: Callable[[str, str], str]):
+                 resource_name_fn: Callable[[str, str], str]):
         self._playbook = playbook
         self._flow = flow
         self._tool = tool
-        self._nombre_recurso = nombre_recurso
+        self._resource_name_fn = resource_name_fn
 
     def resolver(self, kind: str, ref: str) -> str | None:
         if kind == "PLAYBOOK":
@@ -335,90 +335,90 @@ class Resolvedor:
             return self._tool(ref)
         return None
 
-    def nombre(self, kind: str, rid: str) -> str:
-        return self._nombre_recurso(kind, rid)
+    def name(self, kind: str, rid: str) -> str:
+        return self._resource_name_fn(kind, rid)
 
 
-def preflight(body: dict[str, Any], macros: list[Macro], res: Resolvedor,
+def preflight(body: dict[str, Any], macros: list[Macro], res: Resolver,
               display_name: str, referenced_tools: list[str] | None = None,
-              politica: str = "error") -> dict[str, Any]:
+              policy: str = "error") -> dict[str, Any]:
     """Check the BEFORE rules for spending the write.
 
-    Return the final body + the report. Raise `ReglaNegocioError` with the
+    Return the final body + the report. Raise `BusinessRuleError` with the
     message the API would return if something does not add up (so the error arrives with
     cause and not as an unexplained HTTP 400)."""
     instr = body.get("instruction") or {}
-    macros = macros or escanear_macros(
+    macros = macros or scan_macros(
         body.get("goal", ""), instr.get("guidelines", ""),
         instr.get("steps"), body.get("codeBlock"))
 
-    informe_macros: list[dict[str, Any]] = []
-    faltan: list[str] = []
+    macro_report: list[dict[str, Any]] = []
+    missing: list[str] = []
     # referencedTools: explicit + those required by the ${TOOL:...} macros
-    tools_explicitos = list(referenced_tools or [])
-    tools_por_macro: list[str] = []
+    explicit_tools = list(referenced_tools or [])
+    tools_by_macro: list[str] = []
 
     for m in macros:
-        fila: dict[str, Any] = {
-            "tipo": m.kind, "referencia": m.ref, "campo": m.campo,
-            "escaneada": m.escaneada, "macro": m.token,
+        row: dict[str, Any] = {
+            "type": m.kind, "reference": m.ref, "field": m.field,
+            "scanned": m.scanned, "macro": m.token,
         }
         if m.kind == "PLAYBOOK" and m.ref == display_name:
-            fila["estado"] = "autorreferencia"
-            fila["id"] = None
-            informe_macros.append(fila)
+            row["status"] = "self_reference"
+            row["id"] = None
+            macro_report.append(row)
             continue
-        if not m.escaneada:
-            fila["estado"] = "no validada por la API (campo no escaneado)"
-            informe_macros.append(fila)
+        if not m.scanned:
+            row["status"] = "not validated by the API (field not scanned)"
+            macro_report.append(row)
             continue
         rid = res.resolver(m.kind, m.ref)
-        fila["id"] = rid
+        row["id"] = rid
         if rid is None:
-            fila["estado"] = "NO EXISTE under the agent"
-            faltan.append(m.token)
+            row["status"] = "DOES NOT EXIST under the agent"
+            missing.append(m.token)
         else:
-            fila["estado"] = "ok"
+            row["status"] = "ok"
             if m.kind == "TOOL":
-                tools_por_macro.append(res.nombre("TOOL", rid))
-        informe_macros.append(fila)
+                tools_by_macro.append(res.name("TOOL", rid))
+        macro_report.append(row)
 
-    if faltan:
+    if missing:
         # The backend responds with the resource name, not with the token.
-        detalle = ", ".join(sorted({f.split(":", 1)[1] for f in faltan}))
-        raise ReglaNegocioError(
-            f"referencias que no existen under the agent: {detalle} "
-            "(el backend responde 'Referenced resource X does not exist under "
-            "<agente>'). Los playbooks se crean en ORDEN TOPOLOGICO: primero "
-            "los que otros referencian.")
+        detail = ", ".join(sorted({f.split(":", 1)[1] for f in missing}))
+        raise BusinessRuleError(
+            f"references that do not exist under the agent: {detail} "
+            "(the backend answers 'Referenced resource X does not exist under "
+            "<agent>'). The playbooks are created in TOPOLOGICAL ORDER: first "
+            "the ones others reference.")
 
     # R3: every ${TOOL:x} macro needs its explicit binding.
     refs_tool = [m.ref for m in macros
-                 if m.kind == "TOOL" and m.escaneada and m.ref != display_name]
-    bindings = set(tools_explicitos)
-    for nombre_tool in tools_por_macro:
-        bindings.add(nombre_tool)
-    sin_binding = [r for r in refs_tool
-                   if not any(nombre_tool.endswith("/tools/" + r) or
-                              nombre_tool == r or nombre_tool.endswith("/" + r)
-                              for nombre_tool in bindings)]
-    if sin_binding:
-        raise ReglaNegocioError(
-            f"macro(s) de TOOL sin 'referencedTools': {', '.join(sin_binding)}. "
-            "El backend responde 'Tool X used in goal or steps are not listed "
-            "in the referenced tools.' Se anade el binding automatico o se "
-            "pasa 'referenced_tools' con el nombre completo del recurso.")
+                 if m.kind == "TOOL" and m.scanned and m.ref != display_name]
+    bindings = set(explicit_tools)
+    for tool_name in tools_by_macro:
+        bindings.add(tool_name)
+    without_binding = [r for r in refs_tool
+                       if not any(tool_name.endswith("/tools/" + r) or
+                                  tool_name == r or tool_name.endswith("/" + r)
+                                  for tool_name in bindings)]
+    if without_binding:
+        raise BusinessRuleError(
+            f"TOOL macro(s) without 'referencedTools': {', '.join(without_binding)}. "
+            "The backend answers 'Tool X used in goal or steps are not listed "
+            "in the referenced tools.' The automatic binding is added, or "
+            "'referenced_tools' is passed with the full name of the resource.")
 
-    cuerpo, notas = aplicar_politica_autorref(body, macros, display_name, politica)
+    final_body, notes = apply_self_ref_policy(body, macros, display_name, policy)
     if bindings:
-        cuerpo["referencedTools"] = sorted(bindings)
+        final_body["referencedTools"] = sorted(bindings)
 
     return {
-        "cuerpo": cuerpo,
-        "informe": {
-            "macros": informe_macros,
+        "body": final_body,
+        "report": {
+            "macros": macro_report,
             "referenced_tools": sorted(bindings),
-            "autorreferencia": macro_autoreferente(macros, display_name) is not None,
-            "notas": notas,
+            "self_reference": self_referencing_macro(macros, display_name) is not None,
+            "notes": notes,
         },
     }

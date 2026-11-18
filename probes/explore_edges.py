@@ -13,12 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _entorno import agentes_de_sonda
+from _entorno import probe_agents
 
 from cxp.browser import ConsoleBrowser
 from cxp.config import load_config
 
-AGENTS = agentes_de_sonda()
+AGENTS = probe_agents()
 FRAME_URL = (
     "https://conversational-agents.cloud.google.com/cx/projects/{p}/locations/{l}/agents/{a}"
     "/flows/{f}?pageId={pg}&embedded=true"
@@ -57,10 +57,10 @@ def main() -> int:
         print(f"   {n['t']!r} @({n['x']},{n['y']}) cls={n['cls']}")
 
     # Click the page node (the one with 'transicion_canal')
-    objetivo = next((n for n in nodes if "transicion_canal" in n["t"]), None)
-    if objetivo:
-        print(f"\n== clicking the node {objetivo['t']!r}", flush=True)
-        page.mouse.click(objetivo["x"], objetivo["y"])
+    target = next((n for n in nodes if "transicion_canal" in n["t"]), None)
+    if target:
+        print(f"\n== clicking the node {target['t']!r}", flush=True)
+        page.mouse.click(target["x"], target["y"])
         time.sleep(3)
 
     # Read the "Edge Information" panel

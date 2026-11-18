@@ -1,4 +1,4 @@
-"""Per-agent escritura/lectura guards.
+"""Per-agent write/read guards.
 
 Why a separate module: the `"original"` alias can be bypassed by passing the agent's
 raw UUID. The real guard compares the **resolved id**, and is applied
@@ -20,7 +20,7 @@ An agent **without** an entry in either list is NOT accessible: not
 even for reading. Entries accept two forms:
 
 * `<uuid>` -> the permission travels with the uuid (valid in any project);
-* `<proyecto>/<uuid>` -> matches project and agent.
+* `<project>/<uuid>` -> matches project and agent.
 
 The project is derived from the **request path**, not from `CXP_PROJECT`: thus the
 same MCP can read the PROD agent (which lives in another project) with the same
@@ -108,23 +108,23 @@ NO_AGENTS_MSG = (
 )
 
 
-def _entradas(cfg: Config) -> list[tuple[str, str]]:
+def _entries(cfg: Config) -> list[tuple[str, str]]:
     """(project, agent) of the allowlist, without duplicates."""
-    filas: list[tuple[str, str]] = []
+    rows: list[tuple[str, str]] = []
     for entry in cfg.agent_readwrite + cfg.agent_read:
         project, agent = _norm(entry)
-        if agent and (project, agent) not in filas:
-            filas.append((project, agent))
-    return filas
+        if agent and (project, agent) not in rows:
+            rows.append((project, agent))
+    return rows
 
 
-def agents_por_nivel(cfg: Config, level: str) -> list[str]:
+def agents_by_level(cfg: Config, level: str) -> list[str]:
     """The allowed agent ids with a given level (`read` / `read/write`)."""
-    salida: list[str] = []
-    for project, agent in _entradas(cfg):
-        if agent_level(project, agent, cfg) == level and agent not in salida:
-            salida.append(agent)
-    return salida
+    output: list[str] = []
+    for project, agent in _entries(cfg):
+        if agent_level(project, agent, cfg) == level and agent not in output:
+            output.append(agent)
+    return output
 
 
 def resolve_agent(agent: str, cfg: Config) -> str:
@@ -141,19 +141,19 @@ def resolve_agent(agent: str, cfg: Config) -> str:
     if raw:
         return raw.split("/")[-1]
     ids: list[str] = []
-    niveles: dict[str, str] = {}
-    for project, agent_id in _entradas(cfg):
+    levels: dict[str, str] = {}
+    for project, agent_id in _entries(cfg):
         if agent_id not in ids:
             ids.append(agent_id)
-            niveles[agent_id] = agent_level(project, agent_id, cfg)
+            levels[agent_id] = agent_level(project, agent_id, cfg)
     if not ids:
         raise PermissionDeniedError(NO_AGENTS_MSG)
     if len(ids) == 1:
         return ids[0]
-    detalle = ", ".join(f"{agent_id} ({niveles[agent_id]})" for agent_id in ids)
+    detail = ", ".join(f"{agent_id} ({levels[agent_id]})" for agent_id in ids)
     raise PermissionDeniedError(
         f"several allowed agents and none is specified: use agent=<id> "
-        f"({detalle})"
+        f"({detail})"
     )
 
 
@@ -165,8 +165,8 @@ def assert_readable(project: str, agent_id: str, cfg: Config) -> str:
             f"the project {project} is not in CXP_PROJECTS "
             f"({', '.join(cfg.projects)})"
         )
-    nivel = agent_level(project, agent_id, cfg)
-    if nivel == LEVEL_NONE:
+    level = agent_level(project, agent_id, cfg)
+    if level == LEVEL_NONE:
         raise PermissionDeniedError(
             f"the agent {agent_id} (project {project or '?'}) has no permission: "
             "add it to CXP_AGENT_READ or CXP_AGENT_READWRITE"
@@ -220,19 +220,19 @@ _AGENT_RE = re.compile(r"(?:^|/)agents/([^/;?#]+)")
 _PROJECT_RE = re.compile(r"(?:^|/)projects/([^/;?#]+)")
 
 
-def _agents_in(texto: str) -> list[tuple[str, str]]:
+def _agents_in(text: str) -> list[tuple[str, str]]:
     """(project, agent) pairs of a resource path (or of a resource name)."""
-    texto = texto or ""
-    proyecto = ""
-    project_ids = _PROJECT_RE.findall(texto)
+    text = text or ""
+    project = ""
+    project_ids = _PROJECT_RE.findall(text)
     if project_ids:
-        proyecto = project_ids[0]
-    salida: list[tuple[str, str]] = []
-    for m in _AGENT_RE.finditer(texto):
+        project = project_ids[0]
+    output: list[tuple[str, str]] = []
+    for m in _AGENT_RE.finditer(text):
         agent = m.group(1).split(":", 1)[0]
         if agent:
-            salida.append((proyecto, agent))
-    return salida
+            output.append((project, agent))
+    return output
 
 
 def agents_from_url(url: str) -> list[tuple[str, str]]:
@@ -243,28 +243,28 @@ def agents_from_url(url: str) -> list[tuple[str, str]]:
     real as the one in the path."""
     url = url or ""
     path, _, query = url.partition("?")
-    vistos: list[tuple[str, str]] = []
-    for proyecto, agent in _agents_in(path.split("#")[0]):
-        par = (proyecto, agent)
-        if par not in vistos:
-            vistos.append(par)
-    for valor in _query_values(query):
-        for proyecto, agent in _agents_in(valor):
-            par = (proyecto, agent)
-            if par not in vistos:
-                vistos.append(par)
-    return vistos
+    seen: list[tuple[str, str]] = []
+    for project, agent in _agents_in(path.split("#")[0]):
+        pair = (project, agent)
+        if pair not in seen:
+            seen.append(pair)
+    for value in _query_values(query):
+        for project, agent in _agents_in(value):
+            pair = (project, agent)
+            if pair not in seen:
+                seen.append(pair)
+    return seen
 
 
 def _query_values(query: str) -> list[str]:
     """The url-decoded values of the query string."""
-    valores: list[str] = []
-    for trozo in (query or "").split("&"):
-        if not trozo:
+    values: list[str] = []
+    for piece in (query or "").split("&"):
+        if not piece:
             continue
-        _, _, valor = trozo.partition("=")
-        valores.append(unquote(valor))
-    return valores
+        _, _, value = piece.partition("=")
+        values.append(unquote(value))
+    return values
 
 
 def assert_url_allowed(url: str, verb: str, cfg: Config) -> list[tuple[str, str]]:
@@ -275,20 +275,20 @@ def assert_url_allowed(url: str, verb: str, cfg: Config) -> list[tuple[str, str]
     resource name), so a write without an agent can only be a hand-crafted
     path that tries to slip the check."""
     verb = (verb or "GET").upper()
-    pares = agents_from_url(url)
+    pairs = agents_from_url(url)
     if verb in WRITE_VERBS:
-        if not pares:
+        if not pairs:
             raise PermissionDeniedError(
                 f"write {verb} without an identifiable agent in the path: {url!r}. "
                 "Rejected: every CX write is per-agent and must be checked "
                 "against the allowlist"
             )
-        for proyecto, agent in pares:
-            assert_writable(proyecto, agent, cfg)
+        for project, agent in pairs:
+            assert_writable(project, agent, cfg)
     else:
-        for proyecto, agent in pares:
-            assert_readable(proyecto, agent, cfg)
-    return pares
+        for project, agent in pairs:
+            assert_readable(project, agent, cfg)
+    return pairs
 
 
 def assert_playbook_writable(project: str, agent_id: str, cfg: Config) -> str:
@@ -323,21 +323,21 @@ def permission_table(cfg: Config) -> list[dict]:
     the legacy `CXP_READ_ONLY_AGENTS` plus an explicit `<project>/<uuid>`
     entry), the entry with a project wins over the bare one, and
     read + write wins over read only."""
-    filas: dict[str, dict] = {}
+    rows: dict[str, dict] = {}
     for entry in cfg.agent_readwrite + cfg.agent_read:
         project, agent = _norm(entry)
         if not agent:
             continue
-        nivel = LEVEL_READWRITE if any(
+        level = LEVEL_READWRITE if any(
             _matches(e, project, agent) for e in cfg.agent_readwrite
         ) else LEVEL_READ
-        actual = filas.get(agent)
-        if actual is None:
-            filas[agent] = {"proyecto": project or "(cualquiera)",
-                            "agente": agent, "permiso": nivel}
+        current = rows.get(agent)
+        if current is None:
+            rows[agent] = {"project": project or "(any)",
+                           "agent": agent, "permission": level}
             continue
-        if actual["proyecto"] == "(cualquiera)" and project:
-            actual["proyecto"] = project
-        if actual["permiso"] != LEVEL_READWRITE and nivel == LEVEL_READWRITE:
-            actual["permiso"] = LEVEL_READWRITE
-    return list(filas.values())
+        if current["project"] == "(any)" and project:
+            current["project"] = project
+        if current["permission"] != LEVEL_READWRITE and level == LEVEL_READWRITE:
+            current["permission"] = LEVEL_READWRITE
+    return list(rows.values())

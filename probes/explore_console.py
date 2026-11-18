@@ -48,9 +48,9 @@ def main() -> int:
 
     data = {
         "url": page.url,
-        "titulo": page.title(),
-        "selectores": list_selectors(br, limite=200),
-        "peticiones": [
+        "title": page.title(),
+        "selectors": list_selectors(br, limit=200),
+        "requests": [
             {"method": r.get("method"), "url": r.get("url"), "status": r.get("status"),
              "post_len": len(r.get("post_data") or ""),
              "post_data": (r.get("post_data") or "")[:2000],
@@ -62,13 +62,16 @@ def main() -> int:
     }
     Path(args.out).write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"== url: {data['url']}")
-    print(f"== title: {data['titulo']}")
-    print(f"== requests: {len(data['peticiones'])}")
-    for p in data["peticiones"]:
+    print(f"== title: {data['title']}")
+    print(f"== requests: {len(data['requests'])}")
+    for p in data["requests"]:
         print(f"   {p.get('status')} {p['method']} {p['url'][:140]}  (post {p['post_len']} B)")
-    print(f"== selectors: {data['selectores'].get('n')}")
-    for e in data["selectores"].get("elementos", []):
-        print(f"   <{e['tag']}> role={e['role']!r} cls={e['cls'][:40]!r} :: {e['texto'][:70]!r}")
+    print(f"== selectors: {data['selectors'].get('n')}")
+    selectors = data["selectors"]
+    elements = selectors.get("elements") or []
+    for e in elements:
+        text = e.get("text") or ""
+        print(f"   <{e['tag']}> role={e['role']!r} cls={e['cls'][:40]!r} :: {text[:70]!r}")
     print(f"== written in {args.out}")
     return 0
 

@@ -30,7 +30,7 @@ All the MCP needs is **credentials**, not a browser:
     CXP_SESSION_FILE=<path to a storage_state .json>   # alternative to CXP_COOKIE
 
 Permission entries accept two forms: `<uuid>` (the permission travels with the
-uuid, valid in any project) or `<proyecto>/<uuid>` (pairs project and
+uuid, valid in any project) or `<project>/<uuid>` (pairs project and
 agent). The MCP works by default against `v3beta1` (`CXP_API_VERSION`).
 
 The `.env` is looked up in: (1) the `CXP_ENV_FILE` variable, (2) the package

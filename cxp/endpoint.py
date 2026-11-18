@@ -19,7 +19,7 @@ Rules (in this order):
    do not hang off a project are reached, such as `users/me/userSettings/recentProjects`).
 3. If the route starts with `projects/`, it is left as is (regardless of whether the
    project is another one or whether it carries `locations`).
-4. In any other case it is **relative**: `projects/{proyecto}/locations/{location}/` is
+4. In any other case it is **relative**: `projects/{project}/locations/{location}/` is
    prepended.
 
 This module does no network: it only resolves. That makes it trivial to test."""
@@ -33,7 +33,7 @@ VERSION_RE = re.compile(r"^(v[0-9]+(?:[a-z]+[0-9]*)?)(?=/|$)")
 
 # The versions the backend serves (measured: all four respond; `v2beta1`
 # only for `agent/visibility` and `conversationProfiles`).
-VERSIONES_SERVIDAS = ("v3beta1", "v3alpha1", "v3", "v2beta1")
+SERVED_VERSIONS = ("v3beta1", "v3alpha1", "v3", "v2beta1")
 
 
 class PathError(ValueError):
@@ -51,36 +51,36 @@ def split_version(path: str) -> tuple[str, str]:
     if not m:
         return p, ""
     version = m.group(1)
-    resto = p[m.end():]
-    if resto.startswith("/"):
-        resto = resto[1:]
-    return resto, version
+    rest = p[m.end():]
+    if rest.startswith("/"):
+        rest = rest[1:]
+    return rest, version
 
 
-def es_absoluta(path: str) -> bool:
-    """`True` if the route should not receive the proyecto/location prefix."""
+def is_absolute(path: str) -> bool:
+    """`True` if the route should not receive the project/location prefix."""
     p = (path or "").strip()
     return p.startswith("/") or p.startswith("projects/")
 
 
-def _canonica(path: str) -> str:
+def _canonical(path: str) -> str:
     """Resolve the `.` and `..` segments of a path, POSIX style.
 
     A `..` that would leave the root is an error (it is not a path the
     caller can be allowed to ask for)."""
-    partes: list[str] = []
+    parts: list[str] = []
     for seg in (path or "").split("/"):
         if seg in ("", "."):
             continue
         if seg == "..":
-            if not partes:
-                raise PathError("la ruta sale de la raiz (traversal)")
-            partes.pop()
+            if not parts:
+                raise PathError("the path escapes the root (traversal)")
+            parts.pop()
             continue
-        partes.append(seg)
-    if not partes:
-        raise PathError("ruta vacia")
-    return "/".join(partes)
+        parts.append(seg)
+    if not parts:
+        raise PathError("empty path")
+    return "/".join(parts)
 
 
 def resolve_path(path: str, *, version: str = "", project: str = "",
@@ -89,15 +89,15 @@ def resolve_path(path: str, *, version: str = "", project: str = "",
                  agent: str = "") -> tuple[str, str, str]:
     """Resolve a request route.
 
-    Returns `(ruta_final, version_final, query_extra)`.
+    Returns `(final_route, final_version, extra_query)`.
 
-    - `ruta_final`: without version and without host prefix ("projects/p/...").
-    - `version_final`: the version to use (the route's if it carries one, otherwise
+    - `final_route`: without version and without host prefix ("projects/p/...").
+    - `final_version`: the version to use (the route's if it carries one, otherwise
       the one passed in, otherwise `v3beta1`).
-    - `query_extra`: parameters moved to the query because the
+    - `extra_query`: parameters moved to the query because the
       discovery doc did not carry them (e.g. `languageCode`)."""
-    p, version_ruta = split_version(path)
-    version_final = version_ruta or version or "v3beta1"
+    p, route_version = split_version(path)
+    final_version = route_version or version or "v3beta1"
 
     values: dict[str, Any] = dict(params or {})
     if name:
@@ -107,10 +107,10 @@ def resolve_path(path: str, *, version: str = "", project: str = "",
 
     # A marker with no value is an error, not an empty string: better to fail
     # here than to send "projects//agents/". The value may come in `params`.
-    for marcador, valor in (("{project}", project), ("{location}", location),
-                            ("{agent}", values.get("agent") or agent)):
-        if marcador in p and not valor:
-            raise PathError(f"falta el valor de {marcador} en {path!r}")
+    for marker, value in (("{project}", project), ("{location}", location),
+                          ("{agent}", values.get("agent") or agent)):
+        if marker in p and not value:
+            raise PathError(f"missing value for {marker} in {path!r}")
 
     # Full names can be passed on their own: if `name` is a resource `name`
     # and the path is a template, it is used as the value of `{name}`.
@@ -124,7 +124,7 @@ def resolve_path(path: str, *, version: str = "", project: str = "",
         p = p.replace("{agent}", str(values["agent"]))
 
     if not p:
-        raise PathError("ruta vacia")
+        raise PathError("empty path")
 
     # --- canonicalization (SECURITY) --------------------------------------
     # The path is user-supplied (the generic passthrough lets the caller give
@@ -135,43 +135,43 @@ def resolve_path(path: str, *, version: str = "", project: str = "",
     #
     # It is canonicalized HERE, BEFORE the project prefix is added, so that a
     # `..` can neither reach another agent nor escape the prefix
-    # (`../../OTRO/locations/...` would otherwise become another project).
+    # (`../../OTHER/locations/...` would otherwise become another project).
     if re.search(r"%2e|%2f", p, re.IGNORECASE):
         raise PathError(
-            "la ruta lleva traversal codificado (%2e/%2f): no se admite"
+            "the path carries an encoded traversal (%2e/%2f): it is not accepted"
         )
     # A path that starts with "/" is ABSOLUTE from the backend root; that has
     # to be decided BEFORE canonicalizing (which drops the empty segments).
-    absoluta = p.startswith("/")
-    p = _canonica(p)
+    absolute = p.startswith("/")
+    p = _canonical(p)
 
     # --- prefixes ---------------------------------------------------------
-    if absoluta:
+    if absolute:
         pass  # absolute from the root: no project prefix is added
     elif not p.startswith("projects/"):
         if not project:
-            raise PathError(f"hace falta el proyecto para la ruta relativa {path!r}")
+            raise PathError(f"the project is required for the relative route {path!r}")
         p = f"projects/{project}/locations/{location or 'global'}/{p}"
 
-    # The gaps in `{proyecto}` / `{location}` that may remain.
+    # The gaps in `{project}` / `{location}` that may remain.
     p = p.replace("{project}", project or "").replace("{location}", location or "global")
 
     leftovers = re.findall(r"\{[A-Za-z0-9_.]+\}", p)
     if leftovers:
-        raise PathError(f"faltan parametros para el path: {sorted(set(leftovers))}")
+        raise PathError(f"missing parameters for the path: {sorted(set(leftovers))}")
 
     # Parameters not present in the template are query parameters.
-    usados = set(re.findall(r"\{([A-Za-z0-9_.]+)\}", path))
-    query_extra = {k: v for k, v in values.items()
-                   if k not in usados and k not in ("name", "parent", "agent")}
-    return p, version_final, query_extra
+    used = set(re.findall(r"\{([A-Za-z0-9_.]+)\}", path))
+    extra_query = {k: v for k, v in values.items()
+                   if k not in used and k not in ("name", "parent", "agent")}
+    return p, final_version, extra_query
 
 
-def url_de(version: str, path: str, host: str, query: dict[str, Any] | None = None,
-           **extra: Any) -> str:
+def url_for(version: str, path: str, host: str, query: dict[str, Any] | None = None,
+            **extra: Any) -> str:
     """URL backend completion for an already-resolved route."""
     from urllib.parse import urlencode
     q: dict[str, Any] = {k: v for k, v in (query or {}).items() if v is not None}
     q.update({k: v for k, v in extra.items() if v is not None})
-    sufijo = f"?{urlencode(q)}" if q else ""
-    return f"https://{host}/{version}/{path.lstrip('/')}{sufijo}"
+    suffix = f"?{urlencode(q)}" if q else ""
+    return f"https://{host}/{version}/{path.lstrip('/')}{suffix}"

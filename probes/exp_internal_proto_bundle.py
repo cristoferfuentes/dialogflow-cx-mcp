@@ -18,7 +18,7 @@ This script:
   4. proposes the class<->public schema matching by field containment, to say
      WHICH MESSAGE each gap belongs to.
 
-    .venv/bin/python probes/exp_proto_interno_bundle.py [--json /tmp/proto_interno.json]
+    .venv/bin/python probes/exp_internal_proto_bundle.py [--json /tmp/internal_proto.json]
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(RAIZ))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 CONSOLE_HTML = "https://conversational-agents.cloud.google.com/"
 BUNDLE_CACHE = Path("/tmp/cx_console_bundle.js")
@@ -46,7 +46,7 @@ KEYS_RE = re.compile(
     r"|keys:\"([^\"]*)\"\.split)")
 
 
-def descargar_bundle() -> str:
+def download_bundle() -> str:
     """The console HTML points to the bundle; it is cached in /tmp."""
     if BUNDLE_CACHE.exists() and BUNDLE_CACHE.stat().st_size > 1_000_000:
         return BUNDLE_CACHE.read_text(encoding="utf-8", errors="replace")
@@ -63,118 +63,118 @@ def descargar_bundle() -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def clases_del_bundle(bundle: str) -> dict[str, list[str]]:
+def bundle_classes(bundle: str) -> dict[str, list[str]]:
     """class -> fields (in order, without repeats)."""
     out: dict[str, list[str]] = {}
     for m in CLASE_RE.finditer(bundle):
-        clase, campo = m.group(1), m.group(2)
-        campos = out.setdefault(clase, [])
-        if campo not in campos:
-            campos.append(campo)
+        class_name, field = m.group(1), m.group(2)
+        fields = out.setdefault(class_name, [])
+        if field not in fields:
+            fields.append(field)
     return out
 
 
-def claves_por_clase(bundle: str) -> dict[str, list[str]]:
+def keys_by_class(bundle: str) -> dict[str, list[str]]:
     """class -> the `keys:[...]` list its prototype declares."""
     out: dict[str, list[str]] = {}
     for m in KEYS_RE.finditer(bundle):
-        clase = m.group(1)
+        class_name = m.group(1)
         if m.group(2) is not None:
-            campos = re.findall(r'"([^"]+)"', m.group(2))
+            fields = re.findall(r'"([^"]+)"', m.group(2))
         else:
-            campos = (m.group(3) or "").split()
-        if campos:
-            out.setdefault(clase, campos)
+            fields = (m.group(3) or "").split()
+        if fields:
+            out.setdefault(class_name, fields)
     return out
 
 
-def schemas_publicos() -> dict[str, set[str]]:
+def public_schemas() -> dict[str, set[str]]:
     """short schema name -> declared fields (v3beta1)."""
-    doc = json.loads((RAIZ / ".discovery" / "v3beta1.json").read_text())
+    doc = json.loads((ROOT / ".discovery" / "v3beta1.json").read_text())
     out: dict[str, set[str]] = {}
-    for nombre, cuerpo in (doc.get("schemas") or {}).items():
-        corto = nombre.split("V3beta1")[-1] if "V3beta1" in nombre else nombre
-        props = set((cuerpo.get("properties") or {}).keys())
+    for name, body in (doc.get("schemas") or {}).items():
+        short = name.split("V3beta1")[-1] if "V3beta1" in name else name
+        props = set((body.get("properties") or {}).keys())
         if props:
-            out[corto] = props
+            out[short] = props
     return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--json", default="/tmp/proto_interno.json")
+    ap.add_argument("--json", default="/tmp/internal_proto.json")
     args = ap.parse_args()
 
-    bundle = descargar_bundle()
-    clases = clases_del_bundle(bundle)
-    claves = claves_por_clase(bundle)
-    publicos = schemas_publicos()
-    print(f"classes in the bundle: {len(clases)} | public schemas: {len(publicos)}")
+    bundle = download_bundle()
+    classes = bundle_classes(bundle)
+    keys = keys_by_class(bundle)
+    public = public_schemas()
+    print(f"classes in the bundle: {len(classes)} | public schemas: {len(public)}")
 
     # The declared keys are more reliable than the assignment order:
     # the two sources are combined per class.
-    campos_por_clase: dict[str, set[str]] = {}
-    for clase, campos in clases.items():
-        campos_por_clase[clase] = set(campos) | set(claves.get(clase, []))
+    fields_by_class: dict[str, set[str]] = {}
+    for class_name, fields in classes.items():
+        fields_by_class[class_name] = set(fields) | set(keys.get(class_name, []))
 
     # 1) The field names the console has and the public doc does not.
-    publicos_todos: set[str] = set()
-    for props in publicos.values():
-        publicos_todos |= props
-    consola_todos: set[str] = set()
-    for campos in campos_por_clase.values():
-        consola_todos |= campos
-    solo_consola = sorted(consola_todos - publicos_todos)
+    all_public: set[str] = set()
+    for props in public.values():
+        all_public |= props
+    all_console: set[str] = set()
+    for fields in fields_by_class.values():
+        all_console |= fields
+    console_only = sorted(all_console - all_public)
     print(f"\nfields the console has and the public doc does NOT declare: "
-          f"{len(solo_consola)}")
-    for c in solo_consola:
+          f"{len(console_only)}")
+    for c in console_only:
         print("  -", c)
 
     # 2) Match each PUBLIC schema with its internal class.
     #    Criterion: ALL the public fields of the schema are in the class, and
     #    the class brings few extra fields (the internal ones). If two classes
     #    tie, the match is discarded (ambiguous).
-    por_schema: dict[str, list[dict]] = {}
-    for clase, campos in campos_por_clase.items():
-        if len(campos) < 2:
+    by_schema: dict[str, list[dict]] = {}
+    for class_name, fields in fields_by_class.items():
+        if len(fields) < 2:
             continue
-        for nombre, props in publicos.items():
-            if props <= campos:
-                por_schema.setdefault(nombre, []).append({
-                    "clase": clase,
-                    "extra": sorted(campos - props),
-                    "n_publicos": len(props),
+        for name, props in public.items():
+            if props <= fields:
+                by_schema.setdefault(name, []).append({
+                    "class": class_name,
+                    "extra": sorted(fields - props),
+                    "n_public": len(props),
                 })
-    emparejamientos: list[dict] = []
-    for nombre, cands in por_schema.items():
-        cands.sort(key=lambda c: (len(c["extra"]), -c["n_publicos"]))
+    matches: list[dict] = []
+    for name, cands in by_schema.items():
+        cands.sort(key=lambda c: (len(c["extra"]), -c["n_public"]))
         if len(cands) > 1 and (len(cands[0]["extra"]) == len(cands[1]["extra"])
-                               and cands[0]["n_publicos"] == cands[1]["n_publicos"]):
+                               and cands[0]["n_public"] == cands[1]["n_public"]):
             continue                      # ambiguous: nothing is asserted
-        mejor = cands[0]
-        if not mejor["extra"]:
+        best = cands[0]
+        if not best["extra"]:
             continue                      # no internal fields: it adds nothing
-        if mejor["n_publicos"] < 2:
+        if best["n_public"] < 2:
             continue                      # too weak a match
-        emparejamientos.append({
-            "schema_publico": nombre,
-            "clase": mejor["clase"],
-            "n_publicos": mejor["n_publicos"],
-            "n_internos": len(mejor["extra"]),
-            "campos_internos_no_publicos": mejor["extra"],
-            "alternativas": len(cands),
+        matches.append({
+            "public_schema": name,
+            "class": best["class"],
+            "n_public": best["n_public"],
+            "n_internal": len(best["extra"]),
+            "internal_fields_not_public": best["extra"],
+            "alternatives": len(cands),
         })
-    emparejamientos.sort(key=lambda e: (-e["n_publicos"], e["n_internos"]))
+    matches.sort(key=lambda e: (-e["n_public"], e["n_internal"]))
     print(f"\npublic schemas with INTERNAL fields that are not declared: "
-          f"{len(emparejamientos)}")
-    for e in emparejamientos:
-        print(f"  {e['schema_publico']:<34} {e['n_publicos']:>2} public, "
-              f"{e['n_internos']:>2} internal: {e['campos_internos_no_publicos']}")
+          f"{len(matches)}")
+    for e in matches:
+        print(f"  {e['public_schema']:<34} {e['n_public']:>2} public, "
+              f"{e['n_internal']:>2} internal: {e['internal_fields_not_public']}")
 
     Path(args.json).write_text(json.dumps({
-        "solo_consola": solo_consola,
-        "emparejamientos": emparejamientos,
-        "n_clases": len(clases),
+        "console_only": console_only,
+        "matches": matches,
+        "n_classes": len(classes),
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"\n-> {args.json}")
     return 0

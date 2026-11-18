@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Details the temporary resources left behind in the agent and cleans them if possible.
 
-    .venv/bin/python probes/limpia_temporales.py [--dry-run]
+    .venv/bin/python probes/clean_temporaries.py [--dry-run]
 """
 from __future__ import annotations
 
@@ -32,10 +32,12 @@ def main() -> int:
               .get("playbookVersions") or [])
         for v in vs:
             desc = str(v.get("description") or "")
-            mio = desc.startswith("temporal")
+            # Both sentinels are accepted: the old "temporal" and the
+            # current "temporary" (the probes created both).
+            mine = desc.startswith(("temporal", "temporary"))
             print(f"  {p.get('displayName'):<40} {v['name'].rsplit('/', 1)[-1]:<4}"
-                  f" desc={desc[:40]!r} {'<-- MINE' if mio else ''}")
-            if mio and not args.dry_run:
+                  f" desc={desc[:40]!r} {'<-- MINE' if mine else ''}")
+            if mine and not args.dry_run:
                 try:
                     cons.request("DELETE", cons._url("/" + v["name"]))
                     print("      deleted")
@@ -49,14 +51,15 @@ def main() -> int:
         vs = (cons.request("GET", cons._url(
             f"{base}/flows/{f['name'].rsplit('/', 1)[-1]}/versions", pageSize="50"))
             .get("versions") or [])
-        mio = [v for v in vs if str(v.get("description") or "").startswith("temporal")
+        mine = [v for v in vs
+               if str(v.get("description") or "").startswith(("temporal", "temporary"))
                or str(v.get("displayName") or "").startswith("zz_tmp")]
-        if mio:
+        if mine:
             print(f"  {f.get('displayName'):<32} {len(vs)} versions, "
-                  f"{len(mio)} temporary: "
-                  f"{[v.get('displayName') for v in mio]}")
+                  f"{len(mine)} temporary: "
+                  f"{[v.get('displayName') for v in mine]}")
             if not args.dry_run:
-                for v in mio:
+                for v in mine:
                     try:
                         cons.request("DELETE", cons._url("/" + v["name"]))
                         print("      deleted")

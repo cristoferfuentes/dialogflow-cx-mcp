@@ -35,7 +35,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ SCHEMA_PREFIXES = (
 )
 
 # Which prefix corresponds to each version of API.
-PREFIX_DE_VERSION = {
+PREFIX_BY_VERSION = {
     "v3beta1": "GoogleCloudDialogflowCxV3beta1",
     "v3alpha1": "GoogleCloudDialogflowCxV3alpha1",
     "v3": "GoogleCloudDialogflowCxV3",
@@ -68,7 +69,7 @@ DERIVED_FIELDS = frozenset({
     "numTrainingPhrases", "defaultLanguageCode",
 })
 
-# Route expression: `campo`, `campo.sub`, `campo[0]`, `campo[0].sub[2]`.
+# Route expression: `field`, `field.sub`, `field[0]`, `field[0].sub[2]`.
 _PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
@@ -83,11 +84,11 @@ def norm_schema(name: str) -> str:
 def parse_path(path: str) -> list[tuple[str, int | None]]:
     """`'a.b[0].c'` -> `[('a', None), ('b', 0), ('c', None)]`."""
     out: list[tuple[str, int | None]] = []
-    for nombre, indice in _PATH_TOKEN.findall(path or ""):
-        if nombre:
-            out.append((nombre, None))
-        elif indice != "":
-            out.append(("", int(indice)))
+    for name, index in _PATH_TOKEN.findall(path or ""):
+        if name:
+            out.append((name, None))
+        elif index != "":
+            out.append(("", int(index)))
     return out
 
 
@@ -97,15 +98,15 @@ def read_path(obj: Any, path: str) -> Any:
     if not path:
         return None
     cur = obj
-    for nombre, indice in parse_path(path):
-        if indice is not None:
-            if not isinstance(cur, list) or indice >= len(cur):
+    for name, index in parse_path(path):
+        if index is not None:
+            if not isinstance(cur, list) or index >= len(cur):
                 return None
-            cur = cur[indice]
+            cur = cur[index]
         else:
             if not isinstance(cur, dict):
                 return None
-            cur = cur.get(nombre)
+            cur = cur.get(name)
     return cur
 
 
@@ -114,34 +115,34 @@ def apply_path(obj: dict, path: str, value: Any) -> None:
 
     Create any missing intermediate containers. If the last step is an
     index and the element does not exist, create it as a dictionary."""
-    partes = parse_path(path)
-    if not partes:
-        raise ValueError("ruta vacia")
+    parts = parse_path(path)
+    if not parts:
+        raise ValueError("empty route")
     cur: Any = obj
-    for i, (nombre, indice) in enumerate(partes):
-        ultimo = (i == len(partes) - 1)
-        if indice is not None:
+    for i, (name, index) in enumerate(parts):
+        last = (i == len(parts) - 1)
+        if index is not None:
             if not isinstance(cur, list):
-                raise ValueError(f"'{path}': se esperaba una lista en {nombre!r}")
-            while len(cur) <= indice:
+                raise ValueError(f"'{path}': expected a list at {name!r}")
+            while len(cur) <= index:
                 cur.append({})
-            if ultimo:
-                cur[indice] = value
+            if last:
+                cur[index] = value
             else:
-                if not isinstance(cur[indice], (dict, list)):
-                    cur[indice] = {}
-                cur = cur[indice]
+                if not isinstance(cur[index], (dict, list)):
+                    cur[index] = {}
+                cur = cur[index]
         else:
             if not isinstance(cur, dict):
-                raise ValueError(f"'{path}': se esperaba un objeto en {nombre!r}")
-            if ultimo:
-                cur[nombre] = value
+                raise ValueError(f"'{path}': expected an object at {name!r}")
+            if last:
+                cur[name] = value
             else:
-                siguiente = partes[i + 1]
-                vacio: Any = [] if siguiente[1] is not None else {}
-                if not isinstance(cur.get(nombre), (dict, list)):
-                    cur[nombre] = vacio
-                cur = cur[nombre]
+                next_step = parts[i + 1]
+                empty: Any = [] if next_step[1] is not None else {}
+                if not isinstance(cur.get(name), (dict, list)):
+                    cur[name] = empty
+                cur = cur[name]
 
 
 def top_level_keys(path: str) -> list[str]:
@@ -149,14 +150,14 @@ def top_level_keys(path: str) -> list[str]:
 
     `'transitionRoutes[0].targetPlaybook'` -> `['transitionRoutes']`
     (a PATCH with `updateMask=transitionRoutes` rewrites the entire array)."""
-    partes = parse_path(path)
-    return [partes[0][0]] if partes else []
+    parts = parse_path(path)
+    return [parts[0][0]] if parts else []
 
 
 def strip_derived(obj: dict, extra: Iterable[str] = ()) -> dict:
     """Copy of the object without the fields the server derives."""
-    fuera = DERIVED_FIELDS | set(extra)
-    return {k: v for k, v in obj.items() if k not in fuera}
+    excluded = DERIVED_FIELDS | set(extra)
+    return {k: v for k, v in obj.items() if k not in excluded}
 
 
 @dataclass
@@ -171,11 +172,11 @@ class SchemaIndex:
     truth for knowing which one each resource uses."""
 
     version: str = "v3beta1"
-    props: dict[str, dict[str, Any]] = field(default_factory=dict)
-    canonical: dict[str, str] = field(default_factory=dict)
-    colecciones: dict[str, str] = field(default_factory=dict)
-    listas: dict[str, str] = field(default_factory=dict)
-    raw: dict[str, Any] = field(default_factory=dict)
+    props: dict[str, dict[str, Any]] = dc_field(default_factory=dict)
+    canonical: dict[str, str] = dc_field(default_factory=dict)
+    collections: dict[str, str] = dc_field(default_factory=dict)
+    lists: dict[str, str] = dc_field(default_factory=dict)
+    raw: dict[str, Any] = dc_field(default_factory=dict)
 
     # ------------------------------------------------------------- construction
     @classmethod
@@ -184,18 +185,18 @@ class SchemaIndex:
         for full, body in (doc.get("schemas") or {}).items():
             props[full] = body.get("properties") or {}
 
-        por_corto: dict[str, list[str]] = {}
+        by_short: dict[str, list[str]] = {}
         for full in props:
-            por_corto.setdefault(norm_schema(full), []).append(full)
+            by_short.setdefault(norm_schema(full), []).append(full)
 
-        prefijo = PREFIX_DE_VERSION.get(version, "")
+        prefix = PREFIX_BY_VERSION.get(version, "")
         canonical: dict[str, str] = {}
-        for corto, fulls in por_corto.items():
-            elegido = next((f for f in fulls if f.startswith(prefijo)), None)
-            canonical[corto] = elegido or fulls[0]
+        for short, full_names in by_short.items():
+            chosen = next((f for f in full_names if f.startswith(prefix)), None)
+            canonical[short] = chosen or full_names[0]
 
         idx = cls(version=version, props=props, canonical=canonical, raw=doc)
-        idx.colecciones, idx.listas = idx._resolver_colecciones()
+        idx.collections, idx.lists = idx._resolve_collections()
         return idx
 
     @classmethod
@@ -203,7 +204,7 @@ class SchemaIndex:
         return cls.from_doc(json.loads(Path(path).read_text(encoding="utf-8")),
                             version=version)
 
-    def _resolver_colecciones(self) -> tuple[dict[str, str], dict[str, str]]:
+    def _resolve_collections(self) -> tuple[dict[str, str], dict[str, str]]:
         """(item, list) -> COMPLETE name of each collection's schema.
 
         Taken from the discovery doc, which declares TWO distinct types:
@@ -216,71 +217,71 @@ class SchemaIndex:
 
         MEASURED (2026-11-15): sweeping the wrapper with the item schema (or vice
         versa) produces **false positives**: `testCaseResults` comes out as
-        "campo no declarado" if the wrapper is compared against `TestCaseResult`.
+        "field not declared" if the wrapper is compared against `TestCaseResult`.
         That is why the two are stored separately."""
         items: dict[str, str] = {}
-        listas: dict[str, str] = {}
+        lists: dict[str, str] = {}
 
-        def _camina(node: dict, camino: str = "") -> None:
-            for nombre, res in (node or {}).items():
-                ruta = f"{camino}.{nombre}" if camino else nombre
-                metodos = res.get("methods") or {}
-                ref_item = (metodos.get("get", {}).get("response") or {}).get("$ref")
-                ref_lista = (metodos.get("list", {}).get("response") or {}).get("$ref")
-                clave = ""
-                if ".agents." in ruta:
-                    clave = ruta.split(".agents.")[1]
-                elif ruta.endswith(".agents"):
-                    clave = "agents"
-                if clave:
+        def _walk(node: dict, route: str = "") -> None:
+            for name, res in (node or {}).items():
+                full_route = f"{route}.{name}" if route else name
+                methods = res.get("methods") or {}
+                ref_item = (methods.get("get", {}).get("response") or {}).get("$ref")
+                ref_list = (methods.get("list", {}).get("response") or {}).get("$ref")
+                key = ""
+                if ".agents." in full_route:
+                    key = full_route.split(".agents.")[1]
+                elif full_route.endswith(".agents"):
+                    key = "agents"
+                if key:
                     if ref_item:
-                        items[clave] = ref_item
-                    if ref_lista:
-                        listas[clave] = ref_lista
-                _camina(res.get("resources") or {}, ruta)
+                        items[key] = ref_item
+                    if ref_list:
+                        lists[key] = ref_list
+                _walk(res.get("resources") or {}, full_route)
 
-        _camina(self.raw.get("resources") or {})
-        return items, listas
+        _walk(self.raw.get("resources") or {})
+        return items, lists
 
     # ----------------------------------------------------------------- query
-    def esquema_de(self, coleccion: str) -> str:
+    def schema_of(self, collection: str) -> str:
         """The full schema name of the ITEM of a collection.
 
         ('tools' -> '...Tool'; 'testCases.results' -> '...TestCaseResult')"""
-        ref = self.colecciones.get(coleccion)
+        ref = self.collections.get(collection)
         if ref:
             return ref
-        return self.canonical.get(coleccion, "")
+        return self.canonical.get(collection, "")
 
-    def esquema_lista_de(self, coleccion: str) -> str:
+    def list_schema_of(self, collection: str) -> str:
         """The full schema name of the WRAPPER of a listing.
 
         ('tools' -> '...ListToolsResponse'; '' if the discovery doc does not declare it)."""
-        return self.listas.get(coleccion, "")
+        return self.lists.get(collection, "")
 
-    def item_de_lista(self, esquema_lista: str) -> str:
+    def list_item(self, list_schema: str) -> str:
         """The ITEM schema inside a listing wrapper ('' if none)."""
-        pv = self.props_de(esquema_lista)
-        for _campo, spec in pv.items():
+        pv = self.props_of(list_schema)
+        for _field, spec in pv.items():
             ref = (spec.get("items") or {}).get("$ref")
             if ref:
                 return ref.split("/")[-1]
         return ""
 
-    def props_de(self, esquema: str) -> dict[str, Any]:
-        if esquema in self.props:
-            return self.props[esquema]
-        corto = norm_schema(esquema)
-        lleno = self.canonical.get(corto, "")
-        return self.props.get(lleno, {})
+    def props_of(self, schema: str) -> dict[str, Any]:
+        if schema in self.props:
+            return self.props[schema]
+        short = norm_schema(schema)
+        full = self.canonical.get(short, "")
+        return self.props.get(full, {})
 
-    def declared(self, esquema: str) -> set[str]:
+    def declared(self, schema: str) -> set[str]:
         """Fields that the published API declares for that schema."""
-        return set(self.props_de(esquema))
+        return set(self.props_of(schema))
 
-    def sub_schema(self, esquema: str, campo: str) -> str:
+    def sub_schema(self, schema: str, field: str) -> str:
         """The schema name COMPLETE of a field's value ('' if absent)."""
-        pv = self.props_de(esquema).get(campo)
+        pv = self.props_of(schema).get(field)
         if not pv:
             return ""
         ref = pv.get("$ref") or (pv.get("items") or {}).get("$ref")
@@ -291,76 +292,76 @@ class SchemaIndex:
 
 @dataclass
 class Gap:
-    """A field the backend exposes and API publishes does not declare."""
+    """A field the backend exposes and the published API does not declare."""
 
     schema: str          # schema where it lives ("" if it could not be resolved)
-    campo: str           # field name
-    ruta: str            # full route within the resource ("advancedSettings.enabled")
-    valor: Any = None    # actual value (trimmed)
-    solo_lectura: bool = False
+    field: str           # field name
+    route: str           # full route within the resource ("advancedSettings.enabled")
+    value: Any = None    # actual value (trimmed)
+    read_only: bool = False
 
     def as_dict(self) -> dict[str, Any]:
-        d = {"esquema": norm_schema(self.schema) if self.schema else "",
-             "campo": self.campo, "ruta": self.ruta}
-        if self.valor is not None:
-            d["valor"] = self.valor
-        if self.solo_lectura:
-            d["solo_lectura"] = True
+        d = {"schema": norm_schema(self.schema) if self.schema else "",
+             "field": self.field, "route": self.route}
+        if self.value is not None:
+            d["value"] = self.value
+        if self.read_only:
+            d["read_only"] = True
         return d
 
 
-def _recortar(valor: Any, limite: int = 200) -> Any:
+def _truncate(value: Any, limit: int = 200) -> Any:
     try:
-        texto = json.dumps(valor, ensure_ascii=False)
+        text = json.dumps(value, ensure_ascii=False)
     except (TypeError, ValueError):
-        texto = str(valor)
-    if len(texto) > limite:
-        return texto[:limite] + "..."
-    return valor
+        text = str(value)
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return value
 
 
-def find_gaps(obj: Any, esquema: str, idx: SchemaIndex,
-              prefijo: str = "") -> list[Gap]:
-    """Fields of `obj` that the API publishes but does NOT declare.
+def find_gaps(obj: Any, schema: str, idx: SchemaIndex,
+              prefix: str = "") -> list[Gap]:
+    """Fields of `obj` that the published API does NOT declare.
 
     The real JSON is traversed against the public schema: as soon as a field is
     not declared, it is noted and **no further descent** is made (its internal
     shape is unknown to the public schema)."""
-    salida: list[Gap] = []
+    output: list[Gap] = []
     if isinstance(obj, list):
         for i, item in enumerate(obj):
-            salida.extend(find_gaps(item, esquema, idx, f"{prefijo}[{i}]"))
-        return salida
+            output.extend(find_gaps(item, schema, idx, f"{prefix}[{i}]"))
+        return output
     if not isinstance(obj, dict):
-        return salida
-    declarados = idx.declared(esquema)
-    for campo, valor in obj.items():
-        ruta = f"{prefijo}.{campo}" if prefijo else campo
-        if campo not in declarados:
-            salida.append(Gap(schema=esquema, campo=campo, ruta=ruta,
-                              valor=_recortar(valor),
-                              solo_lectura=campo in DERIVED_FIELDS))
+        return output
+    declared = idx.declared(schema)
+    for field, value in obj.items():
+        route = f"{prefix}.{field}" if prefix else field
+        if field not in declared:
+            output.append(Gap(schema=schema, field=field, route=route,
+                              value=_truncate(value),
+                              read_only=field in DERIVED_FIELDS))
             continue
-        sub = idx.sub_schema(esquema, campo)
+        sub = idx.sub_schema(schema, field)
         if sub:
-            salida.extend(find_gaps(valor, sub, idx, ruta))
-    return salida
+            output.extend(find_gaps(value, sub, idx, route))
+    return output
 
 
-def agrupar_gaps(gaps: Iterable[Gap]) -> list[dict[str, Any]]:
+def group_gaps(gaps: Iterable[Gap]) -> list[dict[str, Any]]:
     """Group the gaps by (schema, field) and count where each one appears."""
-    cuenta: dict[tuple[str, str], dict[str, Any]] = {}
+    counts: dict[tuple[str, str], dict[str, Any]] = {}
     for g in gaps:
-        clave = (norm_schema(g.schema) if g.schema else "?", g.campo)
-        if clave not in cuenta:
-            cuenta[clave] = {"esquema": clave[0], "campo": g.campo,
-                             "ejemplo": g.ruta, "apariciones": 0,
-                             "solo_lectura": g.solo_lectura}
-        cuenta[clave]["apariciones"] += 1
-    return sorted(cuenta.values(), key=lambda d: (d["esquema"], d["campo"]))
+        key = (norm_schema(g.schema) if g.schema else "?", g.field)
+        if key not in counts:
+            counts[key] = {"schema": key[0], "field": g.field,
+                           "example": g.route, "occurrences": 0,
+                           "read_only": g.read_only}
+        counts[key]["occurrences"] += 1
+    return sorted(counts.values(), key=lambda d: (d["schema"], d["field"]))
 
 
-def scan_coleccion(datos: Any, idx: SchemaIndex, coleccion: str) -> dict[str, Any]:
+def scan_collection(data: Any, idx: SchemaIndex, collection: str) -> dict[str, Any]:
     """Sweeps what a listing OR a loose resource returns, with its schema.
 
     MEASURED (2026-11-15): a listing returns a WRAPPER
@@ -371,242 +372,241 @@ def scan_coleccion(datos: Any, idx: SchemaIndex, coleccion: str) -> dict[str, An
     covers both.
 
     And the reverse: sweeping a LOOSE resource (a `GET {name}`) with the wrapper
-    schema also gives false positives (all its fields come out "no
-    declarados"). That is why it **auto-detects**
+    schema also gives false positives (all its fields come out "not
+    declared"). That is why it **auto-detects**
     whether the response carries the wrapper's array field: if it does, it is a listing; if not, it is an item.
 
-    Returns {"envoltorio": [...], "items": [...], "n_items": n}."""
-    env_ref = idx.esquema_lista_de(coleccion)
-    item_ref = idx.esquema_de(coleccion)
+    Returns {"wrapper": [...], "items": [...], "n_items": n}."""
+    wrapper_ref = idx.list_schema_of(collection)
+    item_ref = idx.schema_of(collection)
 
     # Is the response a LISTING or a loose resource?
-    es_lista = False
-    if env_ref and isinstance(datos, dict):
-        for campo, spec in idx.props_de(env_ref).items():
+    is_list = False
+    if wrapper_ref and isinstance(data, dict):
+        for field, spec in idx.props_of(wrapper_ref).items():
             if (spec.get("items") or {}).get("$ref"):
-                es_lista = campo in datos
+                is_list = field in data
                 break
 
-    if es_lista:
-        huecos = find_gaps(datos, env_ref, idx)
-        env: list[Gap] = []
+    if is_list:
+        gaps = find_gaps(data, wrapper_ref, idx)
+        wrapper: list[Gap] = []
         items: list[Gap] = []
-        for g in huecos:
-            (items if g.schema and g.schema == item_ref else env).append(g)
-        return {"envoltorio": agrupar_gaps(env), "items": agrupar_gaps(items),
-                "n_items": _cuenta_items(datos, env_ref, idx),
-                "esquema_envoltorio": norm_schema(env_ref),
-                "esquema_item": norm_schema(item_ref)}
+        for g in gaps:
+            (items if g.schema and g.schema == item_ref else wrapper).append(g)
+        return {"wrapper": group_gaps(wrapper), "items": group_gaps(items),
+                "n_items": _count_items(data, wrapper_ref, idx),
+                "wrapper_schema": norm_schema(wrapper_ref),
+                "item_schema": norm_schema(item_ref)}
 
     # Loose resource (or an already unwrapped list of resources).
-    lista = datos if isinstance(datos, list) else [datos]
-    huecos = []
-    for it in lista:
-        huecos.extend(find_gaps(it, item_ref, idx))
-    return {"envoltorio": [], "items": agrupar_gaps(huecos),
-            "n_items": len(lista),
-            "esquema_envoltorio": "", "esquema_item": norm_schema(item_ref)}
+    item_list = data if isinstance(data, list) else [data]
+    gaps = []
+    for it in item_list:
+        gaps.extend(find_gaps(it, item_ref, idx))
+    return {"wrapper": [], "items": group_gaps(gaps),
+            "n_items": len(item_list),
+            "wrapper_schema": "", "item_schema": norm_schema(item_ref)}
 
 
-def _cuenta_items(datos: Any, env_ref: str, idx: SchemaIndex) -> int:
+def _count_items(data: Any, wrapper_ref: str, idx: SchemaIndex) -> int:
     """How many items the wrapper carries (0 if it is not a listing)."""
-    if not isinstance(datos, dict):
+    if not isinstance(data, dict):
         return 0
-    for _campo, spec in idx.props_de(env_ref).items():
+    for _field, spec in idx.props_of(wrapper_ref).items():
         if (spec.get("items") or {}).get("$ref"):
-            v = datos.get(_campo)
+            v = data.get(_field)
             return len(v) if isinstance(v, list) else 0
     return 0
 
 
-# --- The MEASURED catalog ----------------------------------------------------
+# --- The MEASURED catalogue --------------------------------------------------
 # What was verified by dint of PATCH and re-read against the internal backend.
-# `estado`:
-#   "escribible"  -> the server KEEPS it (verified by reading it back)
-#   "derivado"    -> the server COMPUTES it: it can be read but not written
-#   "solo_lectura"-> the backend exposes it and the public API does not even declare it
-CATALOGO_MEDIDO: list[dict[str, Any]] = [
+# `status`:
+#   "writable"  -> the server KEEPS it (verified by reading it back)
+#   "derived"   -> the server COMPUTES it: it can be read but not written
+#   "read_only" -> the backend exposes it and the public API does not even declare it
+MEASURED_CATALOGUE: list[dict[str, Any]] = [
     {
-        "campo": "transitionRoutes[].targetPlaybook",
-        "esquema": "TransitionRoute",
-        "recursos": ["Page", "Flow", "TransitionRouteGroup"],
-        "estado": "escribible",
-        "nota": "El `target` publico es un `oneof` con `target_page` y "
-                "`target_flow`: `target_playbook` NO existe en el proto "
-                "publico y un PATCH por la API publica se descarta en "
-                "silencio (la ruta queda sin destino). El backend de la "
-                "consola si lo conserva.",
-        "herramienta": "cx_set_route_playbook, cx_set_flow_route_playbook, "
-                       "cx_set_group_route_playbook",
+        "field": "transitionRoutes[].targetPlaybook",
+        "schema": "TransitionRoute",
+        "resources": ["Page", "Flow", "TransitionRouteGroup"],
+        "status": "writable",
+        "note": "The public `target` is a `oneof` with `target_page` and "
+                "`target_flow`: `target_playbook` does NOT exist in the public "
+                "proto and a PATCH through the public API is dropped silently "
+                "(the route is left without a destination). The console backend "
+                "does keep it.",
+        "tool": "cx_set_route_playbook, cx_set_flow_route_playbook, "
+                "cx_set_group_route_playbook",
     },
     {
-        "campo": "form.parameters[].description",
-        "esquema": "FormParameter",
-        "recursos": ["Page"],
-        "estado": "escribible",
-        "nota": "La API publica declara `FormParameter` sin `description`: la "
-                "descripcion de un parametro de formulario no se puede poner "
-                "ni leer por API publica.",
-        "herramienta": "cx_set_console_field",
+        "field": "form.parameters[].description",
+        "schema": "FormParameter",
+        "resources": ["Page"],
+        "status": "writable",
+        "note": "The published API declares `FormParameter` without "
+                "`description`: the description of a form parameter can neither "
+                "be set nor read through the published API.",
+        "tool": "cx_set_console_field",
     },
     {
-        "campo": "form.parameters[].convertPhoneticAlphabets",
-        "esquema": "FormParameter",
-        "recursos": ["Page"],
-        "estado": "escribible",
-        "nota": "MEDIDO (2026-11-15, agente de laboratorio): el flag de "
-                "conversion de alfabetos foneticos del parametro de "
-                "formulario se CONSERVA al escribir y releer, y no esta "
-                "declarado en ningun descriptor.",
-        "herramienta": "cx_set_console_field",
+        "field": "form.parameters[].convertPhoneticAlphabets",
+        "schema": "FormParameter",
+        "resources": ["Page"],
+        "status": "writable",
+        "note": "MEASURED (2026-11-15, lab agent): the phonetic alphabet "
+                "conversion flag of the form parameter is KEPT when written and "
+                "read back, and it is not declared in any descriptor.",
+        "tool": "cx_set_console_field",
     },
     {
-        "campo": "intents[].parameters[].description",
-        "esquema": "IntentParameter",
-        "recursos": ["Intent"],
-        "estado": "escribible",
-        "nota": "MEDIDO (2026-11-15, agente de laboratorio): la descripcion de "
-                "un parametro de intent se conserva al escribir y releer. El "
-                "proto publico declara `IntentParameter` sin `description`.",
-        "herramienta": "cx_set_console_field",
+        "field": "intents[].parameters[].description",
+        "schema": "IntentParameter",
+        "resources": ["Intent"],
+        "status": "writable",
+        "note": "MEASURED (2026-11-15, lab agent): the description of an intent "
+                "parameter is kept when written and read back. The public proto "
+                "declares `IntentParameter` without `description`.",
+        "tool": "cx_set_console_field",
     },
     {
-        "campo": "advancedSettings.loggingSettings.disableLogging",
-        "esquema": "AdvancedSettingsLoggingSettings",
-        "recursos": ["Agent", "Page"],
-        "estado": "descartado",
-        "nota": "MEDIDO (2026-11-15): al hacer PATCH de `advancedSettings` el "
-                "servidor VACIA el submensaje (`loggingSettings` queda en "
-                "`{}`). Es el mismo comportamiento que `advancedSettings.enabled`.",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "advancedSettings.loggingSettings.disableLogging",
+        "schema": "AdvancedSettingsLoggingSettings",
+        "resources": ["Agent", "Page"],
+        "status": "dropped",
+        "note": "MEASURED (2026-11-15): when PATCHing `advancedSettings` the "
+                "server EMPTIES the submessage (`loggingSettings` ends up as "
+                "`{}`). It is the same behaviour as `advancedSettings.enabled`.",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "entryFulfillment.messages[].text.ssml",
-        "esquema": "ResponseMessageText",
-        "recursos": ["Page"],
-        "estado": "descartado",
-        "nota": "MEDIDO (2026-11-15): el proto interno tiene `ssml` en "
-                "`ResponseMessageText`, pero al mandarlo en "
-                "`entryFulfillment.messages[].text` el servidor lo descarta "
-                "(deja solo `text`).",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "entryFulfillment.messages[].text.ssml",
+        "schema": "ResponseMessageText",
+        "resources": ["Page"],
+        "status": "dropped",
+        "note": "MEASURED (2026-11-15): the internal proto has `ssml` in "
+                "`ResponseMessageText`, but when it is sent in "
+                "`entryFulfillment.messages[].text` the server drops it "
+                "(only `text` remains).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "entities[].dtmfPattern",
-        "esquema": "EntityTypeEntity",
-        "recursos": ["EntityType"],
-        "estado": "escribible",
-        "nota": "El patron DTMF de una entidad no existe en el proto publico. "
-                "Si se escribe, el servidor lo conserva (medido).",
-        "herramienta": "cx_set_console_field",
+        "field": "entities[].dtmfPattern",
+        "schema": "EntityTypeEntity",
+        "resources": ["EntityType"],
+        "status": "writable",
+        "note": "The DTMF pattern of an entity does not exist in the public "
+                "proto. If it is written, the server keeps it (measured).",
+        "tool": "cx_set_console_field",
     },
     {
-        "campo": "webClientSettings",
-        "esquema": "Agent",
-        "recursos": ["Agent"],
-        "estado": "escribible",
-        "nota": "Ajustes del cliente web de la consola (por ejemplo "
-                "`boxBorderRadius`, que es un STRING). No estan en el proto "
-                "publico.",
-        "herramienta": "cx_set_console_field",
+        "field": "webClientSettings",
+        "schema": "Agent",
+        "resources": ["Agent"],
+        "status": "writable",
+        "note": "Console web client settings (for example `boxBorderRadius`, "
+                "which is a STRING). They are not in the public proto.",
+        "tool": "cx_set_console_field",
     },
     {
-        "campo": "actionSchemas",
-        "esquema": "Tool",
-        "recursos": ["Tool"],
-        "estado": "derivado",
-        "nota": "Los esquemas de accion del tool (hasta 23 en un tool real) "
-                "existen solo en la consola. El servidor los DERIVA del "
-                "`openApiSpec` o del `dataStoreSpec`: escribir el array no "
-                "cambia nada (medido).",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "actionSchemas",
+        "schema": "Tool",
+        "resources": ["Tool"],
+        "status": "derived",
+        "note": "The action schemas of the tool (up to 23 in a real tool) exist "
+                "only in the console. The server DERIVES them from the "
+                "`openApiSpec` or from the `dataStoreSpec`: writing the array "
+                "changes nothing (measured).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "advancedSettings.enabled / .playbackInterruptionSettings "
+        "field": "advancedSettings.enabled / .playbackInterruptionSettings "
                  "/ .speechAdaptationSettings",
-        "esquema": "AdvancedSettings",
-        "recursos": ["Agent", "Page", "Flow"],
-        "estado": "derivado",
-        "nota": "Se leen, pero al escribir el mensaje el servidor vacia los "
-                "subcampos desconocidos: `enabled` desaparece y "
-                "`playbackInterruptionSettings` queda en `{}` (medido).",
-        "herramienta": "cx_gaps (lectura)",
+        "schema": "AdvancedSettings",
+        "resources": ["Agent", "Page", "Flow"],
+        "status": "derived",
+        "note": "They are read, but when the message is written the server "
+                "empties the unknown subfields: `enabled` disappears and "
+                "`playbackInterruptionSettings` ends up as `{}` (measured).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "speakerIdSettings",
-        "esquema": "Agent",
-        "recursos": ["Agent", "Page"],
-        "estado": "derivado",
-        "nota": "El servidor lo devuelve como `{}` y descarta lo que se le "
-                "escriba dentro.",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "speakerIdSettings",
+        "schema": "Agent",
+        "resources": ["Agent", "Page"],
+        "status": "derived",
+        "note": "The server returns it as `{}` and drops whatever is written "
+                "inside it.",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "modelIdentifier / nluSettingsList / nluSettings.customConfigKey",
-        "esquema": "Flow",
-        "recursos": ["Flow"],
-        "estado": "derivado",
-        "nota": "El backend los deriva y los regenera: escribir "
-                "`customConfigKey` devuelve una clave nueva (medido).",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "modelIdentifier / nluSettingsList / nluSettings.customConfigKey",
+        "schema": "Flow",
+        "resources": ["Flow"],
+        "status": "derived",
+        "note": "The backend derives them and regenerates them: writing "
+                "`customConfigKey` returns a new key (measured).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "trainingPhrases[].parts[].auto",
-        "esquema": "IntentTrainingPhrasePart",
-        "recursos": ["Intent"],
-        "estado": "derivado",
-        "nota": "Marca la frase como autogenerada. Se lee; escribirlo no "
-                "cambia nada (medido).",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "trainingPhrases[].parts[].auto",
+        "schema": "IntentTrainingPhrasePart",
+        "resources": ["Intent"],
+        "status": "derived",
+        "note": "It marks the phrase as auto-generated. It is read; writing it "
+                "changes nothing (measured).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "dataStoreSpec.models / .groundingSettings",
-        "esquema": "ToolDataStoreTool",
-        "recursos": ["Tool"],
-        "estado": "derivado",
-        "nota": "El modelo de resumido del tool de data store y sus ajustes "
-                "de grounding solo existen en la consola.",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "dataStoreSpec.models / .groundingSettings",
+        "schema": "ToolDataStoreTool",
+        "resources": ["Tool"],
+        "status": "derived",
+        "note": "The summarization model of the data store tool and its "
+                "grounding settings exist only in the console.",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "projectNumber",
-        "esquema": "Agent",
-        "recursos": ["Agent"],
-        "estado": "solo_lectura",
-        "nota": "El numero de proyecto que ve la consola. No esta en el proto "
-                "publico.",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "projectNumber",
+        "schema": "Agent",
+        "resources": ["Agent"],
+        "status": "read_only",
+        "note": "The project number the console sees. It is not in the public "
+                "proto.",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "speechAdaptationSettings",
-        "esquema": "Playbook",
-        "recursos": ["Playbook"],
-        "estado": "derivado",
-        "nota": "Ajustes de adaptacion de voz del playbook: solo en la "
-                "consola.",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "speechAdaptationSettings",
+        "schema": "Playbook",
+        "resources": ["Playbook"],
+        "status": "derived",
+        "note": "Speech adaptation settings of the playbook: only in the "
+                "console.",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "etag",
-        "esquema": "Environment",
-        "recursos": ["Environment"],
-        "estado": "derivado",
-        "nota": "El `etag` del entorno lo calcula el servidor (medido en el "
-                "agente de laboratorio: el `GET` lo devuelve y el proto "
-                "publico de `Environment` no lo declara).",
-        "herramienta": "cx_gaps (lectura)",
+        "field": "etag",
+        "schema": "Environment",
+        "resources": ["Environment"],
+        "status": "derived",
+        "note": "The `etag` of the environment is computed by the server "
+                "(measured in the lab agent: the `GET` returns it and the public "
+                "proto of `Environment` does not declare it).",
+        "tool": "cx_gaps (read)",
     },
     {
-        "campo": "actualValue / expectedValue / assertionType / warning",
-        "esquema": "TestRunDifference",
-        "recursos": ["TestCaseResult"],
-        "estado": "derivado",
-        "nota": "El proto publico de `TestRunDifference` solo declara `type` "
-                "y `description`: por API publica NO se puede saber **que** "
-                "difiere en un test case fallido (ni el valor esperado ni el "
-                "obtenido ni el aviso). Solo sale al ejecutar el caso, y "
-                "solo si hay diferencias.",
-        "herramienta": "cx_gaps (lectura, agente de laboratorio)",
+        "field": "actualValue / expectedValue / assertionType / warning",
+        "schema": "TestRunDifference",
+        "resources": ["TestCaseResult"],
+        "status": "derived",
+        "note": "The public proto of `TestRunDifference` only declares `type` "
+                "and `description`: through the public API it is NOT possible "
+                "to know **what** differs in a failed test case (neither the "
+                "expected value, nor the obtained one, nor the warning). It "
+                "only comes out when the case is run, and only if there are "
+                "differences.",
+        "tool": "cx_gaps (read, lab agent)",
     },
 ]
 
@@ -614,35 +614,35 @@ CATALOGO_MEDIDO: list[dict[str, Any]] = [
 # There is no new field: the public API says that `versionConfigs` is a
 # list of `{version}`, and `version` is a GENERIC resource name. What it
 # does NOT say (and that is why it fails) is that you must include the ALL version of the graph.
-REGLAS_ENTORNO: list[dict[str, Any]] = [
+ENVIRONMENT_RULES: list[dict[str, Any]] = [
     {
-        "regla": "versionConfigs[].version",
-        "que": "La version de CADA flow del agente (y tambien la del 'start "
-               "flow').",
+        "rule": "versionConfigs[].version",
+        "what": "The version of EVERY flow of the agent (and also that of the "
+                "'start flow').",
         "error": "Flow 'X' is referenced in version 'V' of flow 'F', but not "
                  "included in the environment.",
     },
     {
-        "regla": "versionConfigs[].version",
-        "que": "La version de CADA playbook que referencien las rutas (cierre "
-               "transitivo). El nombre de un playbook es "
-               "'.../playbooks/{id}/versions/{v}'.",
+        "rule": "versionConfigs[].version",
+        "what": "The version of EVERY playbook that the routes reference "
+                "(transitive closure). The name of a playbook is "
+                "'.../playbooks/{id}/versions/{v}'.",
         "error": "Playbook 'P' is referenced in version 'V' of flow 'F', but "
                  "not included in the environment.",
     },
     {
-        "regla": "versionConfigs[].version",
-        "que": "La version de CADA tool que referencien esos playbooks. El "
-               "nombre de un tool es '.../tools/{id}/versions/{v}'.",
+        "rule": "versionConfigs[].version",
+        "what": "The version of EVERY tool that those playbooks reference. The "
+                "name of a tool is '.../tools/{id}/versions/{v}'.",
         "error": "Tool 'T' is referenced in version 'V' of playbook 'P', but "
                  "not included in the environment.",
     },
 ]
 
 
-def catalogo() -> list[dict[str, Any]]:
-    """The measured catalog, as a list of dicts (for the MCP)."""
-    return [dict(c) for c in CATALOGO_MEDIDO]
+def catalogue() -> list[dict[str, Any]]:
+    """The measured catalogue, as a list of dicts (for the MCP)."""
+    return [dict(c) for c in MEASURED_CATALOGUE]
 
 
 # Collections that, in the INTERNAL proto, exist only nested under an
@@ -650,14 +650,14 @@ def catalogo() -> list[dict[str, Any]]:
 # responds **404**: the internal name template is
 # `projects/*/locations/*/agents/*/environments/*/sessions/*/entityTypes/*`.
 # The public discovery doc declares the route at agent level, but it does not exist there.
-COLECCIONES_SOLO_EN_ENTORNO = frozenset({"sessions.entityTypes"})
+COLLECTIONS_ONLY_IN_ENVIRONMENT = frozenset({"sessions.entityTypes"})
 
 # Collections listed with their own method in `ConsoleApi`.
-COLECCIONES = ("intents", "entityTypes", "tools", "webhooks", "generators",
+COLLECTIONS = ("intents", "entityTypes", "tools", "webhooks", "generators",
                "transitionRouteGroups", "playbooks")
 
 # Collection -> `ConsoleApi` method that lists it.
-METODO_DE_COLECCION = {
+METHOD_FOR_COLLECTION = {
     "intents": "list_intents",
     "entityTypes": "list_entity_types",
     "tools": "list_tools",
@@ -685,28 +685,28 @@ def load_schema_index(version: str = "v3beta1", cache_dir: Path | None = None,
     import urllib.request
     url = DISCOVERY_URL.format(host=DISCOVERY_HOST, version=version)
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
-        texto = resp.read().decode("utf-8")
-    doc = json.loads(texto)
+        text = resp.read().decode("utf-8")
+    doc = json.loads(text)
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(texto, encoding="utf-8")
+        cache.write_text(text, encoding="utf-8")
     except OSError:
         pass
     return SchemaIndex.from_doc(doc, version=version)
 
 
-def recurso_kind(name: str) -> str:
+def resource_kind(name: str) -> str:
     """The resource type inferred from its `name` ('.../flows/{f}' -> 'flow')."""
-    partes = (name or "").split("/")
-    for i, p in enumerate(partes):
-        if p == "agents" and i + 1 < len(partes):
-            for q in partes[i + 2:]:
-                if q in COLECCIONES:
+    parts = (name or "").split("/")
+    for i, p in enumerate(parts):
+        if p == "agents" and i + 1 < len(parts):
+            for q in parts[i + 2:]:
+                if q in COLLECTIONS:
                     return q
     return ""
 
 
-def colecciones_listables(idx: SchemaIndex) -> dict[str, str]:
+def listable_collections(idx: SchemaIndex) -> dict[str, str]:
     """Collection -> path suffix of `list`, as declared by the discovery doc.
 
     It is **computed** from the discovery doc (not a hand-written list): the
@@ -717,68 +717,69 @@ def colecciones_listables(idx: SchemaIndex) -> dict[str, str]:
     Example: `flows.pages` -> `pages` (the list hangs off a flow)."""
     out: dict[str, str] = {}
 
-    def _camina(node: dict, camino: str = "") -> None:
-        for nombre, res in (node or {}).items():
-            ruta = f"{camino}.{nombre}" if camino else nombre
+    def _walk(node: dict, route: str = "") -> None:
+        for name, res in (node or {}).items():
+            full_route = f"{route}.{name}" if route else name
             path = ((res.get("methods") or {}).get("list") or {}).get("path") or ""
-            if ".agents." in ruta and "/{+parent}/" in path:
-                sufijo = path.split("/{+parent}/", 1)[1].split("/")[0]
-                out[ruta.split(".agents.", 1)[1]] = sufijo
-            _camina(res.get("resources") or {}, ruta)
+            if ".agents." in full_route and "/{+parent}/" in path:
+                suffix = path.split("/{+parent}/", 1)[1].split("/")[0]
+                out[full_route.split(".agents.", 1)[1]] = suffix
+            _walk(res.get("resources") or {}, full_route)
 
-    _camina(idx.raw.get("resources") or {})
+    _walk(idx.raw.get("resources") or {})
     return out
 
 
-def _listar(cons, parent: str, sufijo: str,
-            page_size: str = "100") -> list[dict]:
-    """`GET {parent}/{sufijo}` -> the list of items (empty if there are none).
+def _list(cons, parent: str, suffix: str,
+          page_size: str = "100") -> list[dict]:
+    """`GET {parent}/{suffix}` -> the list of items (empty if there are none).
 
     MEASURED: the console's internal backend **caps `pageSize` at 100** in
     several endpoints ("Page size should be within [0, 100]" -> HTTP 400), while the public discovery doc says
     nothing. If the server rejects it, it is retried with fewer (50, 20)
     before giving up."""
-    path = f"{parent}/{sufijo}"
+    path = f"{parent}/{suffix}"
     if not path.startswith("/"):
         path = "/" + path
-    ultimo: Exception | None = None
+    last: Exception | None = None
     for size in (page_size, "50", "20", "5"):
         url = cons._url(path, pageSize=size)
         try:
             data = cons.request("GET", url)
         except Exception as exc:
-            ultimo = exc
+            last = exc
             if "Page size" not in str(exc):
                 raise
             continue
         if not isinstance(data, dict):
             return []
-        items = data.get(sufijo)
+        items = data.get(suffix)
         if items is None:
-            for valor in data.values():
-                if isinstance(valor, list):
-                    items = valor
+            for value in data.values():
+                if isinstance(value, list):
+                    items = value
                     break
         return items if isinstance(items, list) else []
-    raise ultimo or RuntimeError(f"no se pudo listar {path}")
+    raise last or RuntimeError(f"could not list {path}")
 
 
-def _nota_de_coleccion(clave: str) -> dict[str, str]:
+def _collection_note(key: str) -> dict[str, str]:
     """Explain why a collection cannot be reached at the agent level."""
-    if clave in COLECCIONES_SOLO_EN_ENTORNO:
-        return {"nota": "en el proto INTERNO esta coleccion solo existe anidada "
-                       "bajo un entorno (environments/{id}/sessions/{sid}/...): "
-                       "a nivel de agente la ruta da 404. Se barre en el "
-                       "agente de laboratorio (environments.sessions.entityTypes).",
-                "equivalente_en_entorno": "environments.sessions.entityTypes"}
+    if key in COLLECTIONS_ONLY_IN_ENVIRONMENT:
+        return {"note": "in the INTERNAL proto this collection only exists "
+                        "nested under an environment "
+                        "(environments/{id}/sessions/{sid}/...): at agent level "
+                        "the route gives 404. It is swept in the lab agent "
+                        "(environments.sessions.entityTypes).",
+                "equivalent_in_environment": "environments.sessions.entityTypes"}
     return {}
 
 
 def scan_agent(cons, agent_id: str, project: str = "",
                idx: SchemaIndex | None = None,
-               incluir_paginas: bool = True,
-               max_recursos: int = 25,
-               max_padres: int = 3) -> dict[str, Any]:
+               include_pages: bool = True,
+               max_resources: int = 25,
+               max_parents: int = 3) -> dict[str, Any]:
     """Walk an agent and return the gaps it sees, LIVE.
 
     It uses no hand-written list: it compares the JSON returned by the
@@ -786,90 +787,90 @@ def scan_agent(cons, agent_id: str, project: str = "",
     adds a new field to the console, the MCP detects it without touching the code.
 
     The walk is **generic**: it lists ALL the collections the
-    descriptor declares under an agent (`colecciones_listables()`), including
+    descriptor declares under an agent (`listable_collections()`), including
     the nested ones (`flows.pages`, `tools.versions`, `playbooks.examples`,
     `environments.deployments`, `testCases.results`...). For the nested ones the ancestor must be
     resolved (`flows.pages` needs a flow): the first one that exists is used and
     where it comes from is noted.
 
     Returns:
-        {"agente":..., "recursos": {tipo: n}, "huecos": [...], "por_recurso": {...}}"""
+        {"agent":..., "resources": {type: n}, "gaps": [...], "by_resource": {...}}"""
     idx = idx or load_schema_index(cons.cfg.api_version)
     project = project or cons.cfg.project
     base = f"/projects/{project}/locations/{cons.cfg.location}"
     agent_name = f"{base}/agents/{agent_id}"
-    huecos: list[Gap] = []
-    recursos: dict[str, int] = {}
-    por_recurso: list[dict[str, Any]] = []
-    sin_alcanzar: list[dict[str, str]] = []
-    escaneadas: list[str] = []      # collections with SOMETHING inside
-    alcanzables: list[str] = []      # collections that could be listed
+    gaps: list[Gap] = []
+    resources: dict[str, int] = {}
+    by_resource: list[dict[str, Any]] = []
+    unreachable: list[dict[str, str]] = []
+    scanned: list[str] = []      # collections with SOMETHING inside
+    reachable: list[str] = []      # collections that could be listed
 
-    def _anota(tipo: str, nombre: str, obj: Any, coleccion: str) -> None:
-        nonlocal huecos
-        if coleccion not in escaneadas:
-            escaneadas.append(coleccion)
-        recursos[tipo] = recursos.get(tipo, 0) + 1
-        esquema = idx.esquema_de(coleccion)
-        g = find_gaps(obj, esquema, idx)
+    def _annotate(kind: str, name: str, obj: Any, collection: str) -> None:
+        nonlocal gaps
+        if collection not in scanned:
+            scanned.append(collection)
+        resources[kind] = resources.get(kind, 0) + 1
+        schema = idx.schema_of(collection)
+        g = find_gaps(obj, schema, idx)
         if g:
-            por_recurso.append({"tipo": tipo, "recurso": nombre,
-                                "esquema": norm_schema(esquema), "huecos": len(g)})
-        huecos.extend(g)
+            by_resource.append({"type": kind, "resource": name,
+                                "schema": norm_schema(schema), "gaps": len(g)})
+        gaps.extend(g)
 
     # --- agent ---
     ag = cons.request("GET", cons._url(f"{agent_name}"))
-    _anota("agent", agent_id, ag, "agents")
+    _annotate("agent", agent_id, ag, "agents")
 
     # --- ALL the discovery doc's collections ---
-    for clave, sufijo in sorted(colecciones_listables(idx).items()):
-        if clave == "flows.pages" and not incluir_paginas:
+    for key, suffix in sorted(listable_collections(idx).items()):
+        if key == "flows.pages" and not include_pages:
             continue
         # The ancestor is resolved (e.g. "flows" for "flows.pages"). SEVERAL candidates are
-        # stored (up to `max_padres`): if the first has no pages, the second may.
-        padres: list[str] = [agent_name]
-        fallo: str | None = None
-        for segmento in clave.split(".")[:-1]:
-            encontrados: list[str] = []
-            for p in padres:
+        # stored (up to `max_parents`): if the first has no pages, the second may.
+        parents: list[str] = [agent_name]
+        failure: str | None = None
+        for segment in key.split(".")[:-1]:
+            found: list[str] = []
+            for p in parents:
                 try:
-                    items = _listar(cons, p, segmento)
+                    items = _list(cons, p, segment)
                 except Exception as exc:
-                    fallo = str(exc)[:200]
+                    failure = str(exc)[:200]
                     break
-                encontrados.extend(str(i.get("name")) for i in items
-                                    if i.get("name"))
-            if fallo:
+                found.extend(str(i.get("name")) for i in items
+                             if i.get("name"))
+            if failure:
                 break
-            if not encontrados:
-                fallo = (f"no hay ningun '{segmento}' que usar como ancestro")
+            if not found:
+                failure = (f"there is no '{segment}' to use as an ancestor")
                 break
-            padres = encontrados[:max_padres]
-        if fallo:
-            sin_alcanzar.append({"coleccion": clave, "motivo": fallo,
-                                 **_nota_de_coleccion(clave)})
+            parents = found[:max_parents]
+        if failure:
+            unreachable.append({"collection": key, "reason": failure,
+                                **_collection_note(key)})
             continue
-        for parent in padres:
+        for parent in parents:
             try:
-                items = _listar(cons, parent, sufijo)
+                items = _list(cons, parent, suffix)
             except Exception as exc:
-                sin_alcanzar.append({"coleccion": clave, "motivo": str(exc)[:200],
-                                     **_nota_de_coleccion(clave)})
+                unreachable.append({"collection": key, "reason": str(exc)[:200],
+                                    **_collection_note(key)})
                 continue
-            if clave not in alcanzables:
-                alcanzables.append(clave)
-            for item in items[:max_recursos]:
-                etiqueta = (item.get("displayName") or item.get("name") or "")
-                _anota(clave, etiqueta, item, clave)
+            if key not in reachable:
+                reachable.append(key)
+            for item in items[:max_resources]:
+                label = (item.get("displayName") or item.get("name") or "")
+                _annotate(key, label, item, key)
 
     return {
-        "agente": agent_id,
-        "proyecto": project,
-        "recursos_escaneados": recursos,
-        "colecciones": len(colecciones_listables(idx)),
-        "colecciones_escaneadas": sorted(escaneadas),
-        "colecciones_alcanzables": sorted(alcanzables),
-        "sin_alcanzar": sin_alcanzar,
-        "huecos": agrupar_gaps(huecos),
-        "por_recurso": por_recurso,
+        "agent": agent_id,
+        "project": project,
+        "scanned_resources": resources,
+        "collections": len(listable_collections(idx)),
+        "collections_scanned": sorted(scanned),
+        "reachable_collections": sorted(reachable),
+        "unreachable": unreachable,
+        "gaps": group_gaps(gaps),
+        "by_resource": by_resource,
     }
