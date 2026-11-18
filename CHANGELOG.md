@@ -9,9 +9,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `docs/SETUP_PROMPT.md`: a **setup prompt** you can paste into any agent so it configures
+  the MCP end to end (clone + install → cookies → `.env` → MCP client registration →
+  verification with `cx_status`). It asks you for only three things: the project, the
+  location and the agent you may write on.
+- `docs/HUECOS_API.md`: the **catalogue of the gaps** the public API cannot express (38
+  fields / 14 schemas with their measured write state, the 9 endpoints in no descriptor,
+  `targetPlaybook` in depth and how each one was measured).
+- `docs/LIMITES_API.md`: the **measured limits** of the API (symptom → cause →
+  workaround for 31 traps) plus the first-party auth headers, the versions and the
+  network constants.
+- `docs/PROMPT_AGENTE.md`: the **instructions for the agent** that consumes this MCP.
+- `docs/CONVERSACIONES.md`: the **conversation history** through the API and how to
+  publish the logs.
 - `tools/verifica.py`: local verification runner. It runs the unit tests, the linter,
   the server start-up check and the secret scan (working tree **and** git history),
   and regenerates the badges in `docs/badges/`.
+
+### Changed
+
+- The README is now an **onboarding document**: it explains what the MCP is for, the
+  three problems it solves, how to install, configure and use it, and it links to the
+  detailed documents in `docs/` instead of inlining them.
 
 ### Removed
 
