@@ -24,7 +24,7 @@ def main() -> int:
     cfg = load_config()
     api = ConsoleApi(cfg)
     project = cfg.project
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     base = f"projects/{project}/locations/global/agents/{agent}"
     api_base = api._base(project)
 

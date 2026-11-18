@@ -75,7 +75,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.default_agent
+    agente = args.agente or cfg.only_agent()
     proyecto = args.proyecto or cfg.project
     cons = ConsoleApi(cfg)
     res: dict = {"agente": agente, "proyecto": proyecto}

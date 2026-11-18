@@ -63,16 +63,52 @@ from cxp.guard import (
     ReadOnlyAgentError,
     agent_from_path,
     agent_level,
+    agents_por_nivel,
     assert_playbook_writable,
     assert_readable,
     assert_writable,
     permission_table,
+    resolve_agent,
 )
 from cxp.httpclient import HttpStatusError, Session
 from cxp.mirror import Mirror, MirrorError
 from cxp.routing import find_route, summarize
 
-mcp = _McpServer("cx-playbook")
+# ---------------------------------------------------------------------------
+# The rules the agent that consumes this MCP MUST follow.
+#
+# They are sent as the **instructions of the MCP server** (the client shows
+# them to the model) and they are repeated in `cx_status` (the first call any
+# agent should make), so that the boundaries of the MCP are known before the
+# first tool call and not after the first refusal.
+# ---------------------------------------------------------------------------
+REGLAS = """\
+1) USE ONLY THESE TOOLS. Never call the Dialogflow CX public API
+(dialogflow.googleapis.com), the console backend or any other HTTP client
+directly, and never reproduce this MCP's requests by hand: the public API
+silently DROPS the fields this MCP exists to write (transitionRoutes[].\
+targetPlaybook, advancedSettings.speechSettings, dtmfPattern, webClientSettings,\
+...), and this MCP is also the only path that enforces the per-agent allowlist.
+
+2) WORK ONLY ON THE AGENTS OF THE ALLOWLIST: the agents of CXP_AGENT_READ (read\
+only) and CXP_AGENT_READWRITE (read + write). The others do not exist for you:\
+they are not listed and every operation on them is refused. Call cx_status to\
+see the table.
+
+3) WRITES ONLY ON CXP_AGENT_READWRITE AGENTS. An agent of CXP_AGENT_READ is\
+never modified. If a tool needs an agent and you did not pass one, it works only\
+when the allowlist leaves a single candidate; otherwise it tells you which agents\
+are available and you must choose.
+
+4) IF A TASK IS BLOCKED BY THESE LIMITS, DO NOT LOOK FOR A WAY AROUND THEM: no\
+direct API call, no other credential, no crafted path, no alias. Re-plan the task\
+inside the limits (work on the copy instead of the original, ask the user which\
+allowed agent to use, return a plan instead of applying it, read the reference\
+agent instead of writing it). If the task genuinely needs more, tell the user\
+exactly which permission has to be added (which agent, and CXP_AGENT_READ or\
+CXP_AGENT_READWRITE)."""
+
+mcp = _McpServer("cx-playbook", instructions=REGLAS)
 
 CFG = load_config()
 
@@ -105,7 +141,12 @@ def _looks_like_uuid(value: str) -> bool:
 
 
 def _resolve_agent(agent: str) -> str:
-    return agent or CFG.default_agent
+    """The agent to work on.
+
+    There is NO default agent: the allowlist is the list of agents.
+    Without an explicit agent it works only when the allowlist leaves a single
+    candidate; otherwise it says which agents are available."""
+    return resolve_agent(agent, CFG)
 
 
 def _resolve_flow(cons: ConsoleApi, agent_id: str, flow: str, project: str = "") -> str:
@@ -257,6 +298,50 @@ def _guard_path(path: str, verb: str) -> None:
         assert_readable(project, agent, CFG)
 
 
+def _agente_para_la_ruta(path: str, agent: str,
+                         params: dict | None = None) -> str:
+    """The agent to fill the `{agent}` placeholder of a path template.
+
+    It is resolved ONLY when the template needs it and nobody provided it: a
+    path without an agent (e.g. `GET /projects`) is legitimate and must not
+    fail because the allowlist has several agents."""
+    if agent:
+        return agent
+    if params and params.get("agent"):
+        return str(params["agent"])
+    if "{agent}" in (path or ""):
+        return resolve_agent("", CFG)
+    return ""
+
+
+def _proyecto_del_agente(agent_id: str) -> str:
+    """The project of an allowlist entry written as `<project>/<uuid>` ('' if none).
+
+    An entry with a project means "this agent, in that project": the MCP works
+    on it there instead of on `CXP_PROJECT` (the agent may live in another
+    project, e.g. the PROD one)."""
+    objetivo = (agent_id or "").strip()
+    if not objetivo:
+        return ""
+    for entry in CFG.agent_readwrite + CFG.agent_read:
+        if "/" not in entry:
+            continue
+        project, _, agent = entry.partition("/")
+        if agent.strip() == objetivo:
+            return project.strip()
+    return ""
+
+
+def _agente_unico(candidatos: list[str], que: str) -> str:
+    """The only candidate of a list (or '' when there is none or more than one).
+
+    It is used to deduce the origin/destination of a clone from the
+    allowlist: with several candidates the MCP does not guess."""
+    if len(candidatos) == 1:
+        return candidatos[0]
+    return ""
+
+
 def _resolve_path(path: str, name: str, parent: str, params: dict | None,
                   query: dict | None, project: str, agent: str,
                   version: str = "", location: str = "") -> tuple[str, dict]:
@@ -273,7 +358,7 @@ def _resolve_path(path: str, name: str, parent: str, params: dict | None,
             path, version=version, project=project,
             location=location or CFG.location,
             name=name, parent=parent, params=params,
-            agent=agent or CFG.default_agent,
+            agent=_agente_para_la_ruta(path, agent, params),
         )
     except PathError as exc:
         raise MirrorError(str(exc)) from exc
@@ -295,7 +380,7 @@ def _build_url(path: str, name: str, parent: str, params: dict | None,
             path, version=version, project=project,
             location=location or CFG.location,
             name=name, parent=parent, params=params,
-            agent=agent or CFG.default_agent,
+            agent=_agente_para_la_ruta(path, agent, params),
         )
     except PathError as exc:
         raise MirrorError(str(exc)) from exc
@@ -337,8 +422,12 @@ def cx_status() -> dict:
 
     Returns where the configuration came from, whether the 5 mandatory
     cookies are present, the proto version in use, the **permission table** of each
-    agent (read / lectura-escritura / no access) and whether the internal backend
-    ACCEPTS the session (real GET)."""
+    agent (read / lectura-escritura / no access), the **rules** the agent that
+    consumes this MCP must follow, and whether the internal backend ACCEPTS the
+    session (real GET).
+
+    **Call it first**: it is the fastest way to know which agents exist for
+    this MCP and what can be done with them."""
     out: dict[str, Any] = {
         "proyecto": CFG.project or None,
         "location": CFG.location,
@@ -349,11 +438,23 @@ def cx_status() -> dict:
         "api_key": "puesta" if CFG.api_key else "FALTA",
         "cookies_requeridas": list(("SAPISID", "SID", "HSID", "SSID", "APISID")),
         "cookies_faltantes": CFG.missing_cookies(),
-        "agente_por_defecto": CFG.default_agent or None,
-        "agentes_solo_lectura": CFG.read_only_agents,
+        "agentes_permitidos": CFG.allowed_agent_ids(),
+        "agentes_solo_lectura": agents_por_nivel(CFG, "lectura"),
+        "agentes_con_escritura": agents_por_nivel(CFG, "lectura/escritura"),
         "proyectos_permitidos": CFG.projects or "(sin restriccion)",
         "permisos": permission_table(CFG),
+        "reglas": REGLAS,
     }
+    error_permisos = CFG.permissions_error()
+    if error_permisos:
+        # Without an agent in the allowlist the MCP has nothing to work on.
+        out["permisos_ok"] = False
+        out["error_permisos"] = error_permisos
+        out["credenciales_ok"] = False
+        out.update(_sin_credenciales())
+        out["error"] = error_permisos
+        return out
+    out["permisos_ok"] = True
     try:
         from cxp.limits import CONSTANTES, LIMITES
         out["constantes_rendimiento"] = CONSTANTES
@@ -371,6 +472,8 @@ def cx_status() -> dict:
         agentes = cons.list_agents()
         out["credenciales_ok"] = True
         out["sesion_aceptada"] = True
+        # ONLY the agents of the allowlist are visible: the rest does not
+        # exist for this MCP (and it could not work on them either).
         out["agentes_visibles"] = [
             {"id": a["name"].split("/")[-1],
              "displayName": a.get("displayName"),
@@ -378,7 +481,15 @@ def cx_status() -> dict:
              "permiso": agent_level(a["name"].split("/")[1],
                                     a["name"].split("/")[-1], CFG)}
             for a in agentes
+            if agent_level(a["name"].split("/")[1],
+                           a["name"].split("/")[-1], CFG) != "ninguno"
         ]
+        out["agentes_ocultos"] = len(agentes) - len(out["agentes_visibles"])
+        # Are the allowed agents really there? An entry of the allowlist may
+        # point to an agent that does not exist any more (deleted, or in a
+        # project this session does not see): the MCP says it instead of
+        # failing later with a 404.
+        out["agentes_comprobados"] = _comprobar_agentes(cons)
     except HttpStatusError as exc:
         out["credenciales_ok"] = False
         out["sesion_aceptada"] = False
@@ -486,7 +597,11 @@ def cx_api(method: str = "", path: str = "", name: str = "", parent: str = "",
     if not CFG.credentials_ok():
         return _sin_credenciales()
     mir = _mirror()
-    proj = project or CFG.project
+    # The project of an allowlist entry ('<project>/<uuid>') wins over
+    # `CXP_PROJECT`: the agent may live in another project.
+    agente_api = (agent or (params or {}).get("agent")
+                  or _agent_of(name or "") or _agent_of(parent or ""))
+    proj = project or _proyecto_del_agente(agente_api) or CFG.project
     try:
         verb = ""
         if method and method.upper() in HTTP_VERBS:
@@ -546,6 +661,7 @@ def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
     reqs = list(requests or [])
     if not reqs:
         return {"error": "falta `requests`"}
+    # Each sub-request carries its own agent, so the batch has ONE project.
     proj = project or CFG.project
     t0 = time.perf_counter()
     try:
@@ -568,7 +684,7 @@ def cx_batch(requests: list[dict] | None = None, project: str = "") -> dict:
             if item.get("parent"):
                 values["parent"] = item["parent"]
             if not values.get("parent"):
-                values["parent"] = _resource_name(agent or CFG.default_agent, proj)
+                values["parent"] = _resource_name(_resolve_agent(agent), proj)
             url, verb = mir.url(method, params=values)
             from urllib.parse import parse_qsl, urlsplit
             sp = urlsplit(url)
@@ -626,7 +742,7 @@ def cx_net_probe(repeticiones: int = 5, path: str = "agents/{agent}",
         return _sin_credenciales()
     cons = _api()
     agent_id = _resolve_agent(agent)
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     try:
         url = cons._url(f"{cons._base(proj)}/{path.replace('{agent}', agent_id)}")
     except Exception:
@@ -681,9 +797,21 @@ def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
     from cxp.clone import Cloner
 
     cons = _api()
-    src = origen or CFG.default_agent
-    dst = destino or CFG.default_agent
+    # The clone works with ONE project for the source and the target (the
+    # ids are remapped inside it): the project is explicit or `CXP_PROJECT`.
     proj = project or CFG.project
+    # There is no default agent: the source is the readable agent (the
+    # read-only one of the allowlist) and the target the writable one.
+    src = origen or _agente_unico(agents_por_nivel(CFG, "lectura"), "origen")
+    dst = destino or _agente_unico(agents_por_nivel(CFG, "lectura/escritura"),
+                                    "destino")
+    if not src or not dst:
+        return {
+            "error": "no se puede deducir origen/destino de la lista blanca",
+            "permitidos_lectura": agents_por_nivel(CFG, "lectura"),
+            "permitidos_escritura": agents_por_nivel(CFG, "lectura/escritura"),
+            "pista": "pasa origen=<uuid> y destino=<uuid>",
+        }
     if src == dst:
         return {"error": "origen y destino son el mismo agente"}
     try:
@@ -724,7 +852,12 @@ def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
 @mcp.tool()
 def cx_list_agents(project: str = "", location: str = "",
                    todas_las_locations: bool = False) -> dict:
-    """List the project's agents (those the session can see).
+    """List the agents this MCP can work on (the ones of the allowlist).
+
+    The session may see more agents in the project, but **they are not
+    listed**: an agent that is not in `CXP_AGENT_READ` nor in
+    `CXP_AGENT_READWRITE` does not exist for this MCP (it could not be read
+    nor written either). `ocultos_por_permisos` says how many were filtered out.
 
     - project: project (default, `CXP_PROJECT`).
     - location: location (default, `CXP_LOCATION`).
@@ -740,6 +873,7 @@ def cx_list_agents(project: str = "", location: str = "",
             locations = LOCACIONES_CONOCIDAS
         rows: list[dict] = []
         errores: list[dict] = []
+        ocultos = 0
         for loc in locations:
             try:
                 agents = cons.list_agents(project, location=loc)
@@ -748,23 +882,92 @@ def cx_list_agents(project: str = "", location: str = "",
                 continue
             for a in agents:
                 parts = a["name"].split("/")
+                permiso = agent_level(parts[1], parts[-1], CFG)
+                if permiso == "ninguno":
+                    # Not on the allowlist: it does not exist for this MCP.
+                    ocultos += 1
+                    continue
                 rows.append({
                     "id": parts[-1],
                     "displayName": a.get("displayName"),
                     "proyecto": parts[1],
                     "location": parts[3] if len(parts) > 3 else loc,
-                    "permiso": agent_level(parts[1], parts[-1], CFG),
+                    "permiso": permiso,
+                    "en_el_proyecto": True,
                     "startFlow": (a.get("startFlow") or "").split("/")[-1],
                     "startPlaybook": (a.get("startPlaybook") or "").split("/")[-1],
                 })
         salida = {"proyecto": project or CFG.project,
                   "locations": locations,
-                  "total": len(rows), "agentes": rows}
+                  "total": len(rows), "agentes": rows,
+                  "filtrado_por_permisos": True,
+                  "ocultos_por_permisos": ocultos}
+        # The agents of the allowlist that do NOT live in the listed project
+        # are added too: the list is "the agents this MCP can work on", not
+        # "the agents of a project".
+        faltan = _agentes_permitidos_fuera(rows)
+        if faltan:
+            salida["agentes"].extend(faltan)
+            salida["total"] = len(salida["agentes"])
         if errores:
             salida["errores"] = errores
         return salida
     except Exception as exc:
         return _err(exc)
+
+
+def _comprobar_agentes(cons: ConsoleApi) -> list[dict]:
+    """A real GET on every allowed agent: does it still exist?
+
+    An entry of the allowlist can point to an agent that is not there any
+    more (deleted, or in a project this session does not see). The MCP says
+    so instead of failing later with a 404."""
+    salida: list[dict] = []
+    for agent_id in CFG.allowed_agent_ids():
+        proyecto = _proyecto_del_agente(agent_id) or CFG.project
+        url = cons._url(f"{cons._base(proyecto)}/agents/{agent_id}")
+        fila = {"agente": agent_id, "proyecto": proyecto}
+        try:
+            cons.request("GET", url)
+            fila["accesible"] = True
+        except HttpStatusError as exc:
+            fila["accesible"] = False
+            fila["http"] = exc.status
+        except Exception as exc:  # pragma: no cover
+            fila["accesible"] = False
+            fila["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+        salida.append(fila)
+    return salida
+
+
+def _agentes_permitidos_fuera(rows: list[dict]) -> list[dict]:
+    """The allowed agents that the project listing did not return.
+
+    An allowlist entry may point to an agent of **another project** (the PROD
+    one, for example): it is allowed, so it has to be visible."""
+    ya = {r.get("id") for r in rows}
+    fuera: list[dict] = []
+    for entry in CFG.agent_readwrite + CFG.agent_read:
+        if "/" in entry:
+            project, _, agent = entry.partition("/")
+        else:
+            project, agent = "", entry
+        project, agent = project.strip(), agent.strip()
+        if not agent or agent in ya:
+            continue
+        nivel = agent_level(project, agent, CFG)
+        if nivel == "ninguno":
+            continue
+        fuera.append({
+            "id": agent,
+            "displayName": None,
+            "proyecto": project or "(otro proyecto)",
+            "location": None,
+            "permiso": nivel,
+            "en_el_proyecto": False,
+        })
+        ya.add(agent)
+    return fuera
 
 
 @mcp.tool()
@@ -773,7 +976,7 @@ def cx_get_agent(agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         data = cons.request("GET", cons._url(f"{cons._base(proj)}/agents/{agent_id}"))
         return {"agente": agent_id, "proyecto": proj, "datos": data}
     except Exception as exc:
@@ -787,7 +990,7 @@ def cx_update_agent(agent: str = "", body: dict | None = None,
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         assert_writable(proj, agent_id, CFG)
         url = cons._url(f"{cons._base(proj)}/agents/{agent_id}", alt="json")
         data = cons.request("PATCH", url, body=body or {},
@@ -804,7 +1007,7 @@ def cx_list_flows(agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         flows = cons.list_flows(agent_id, proj)
         return {"agente": agent_id, "proyecto": proj, "total": len(flows),
                 "flows": [{"id": f["name"].split("/")[-1],
@@ -821,7 +1024,7 @@ def cx_get_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         data = cons.get_flow(agent_id, flow_id, project=proj)
         return {"agente": agent_id, "proyecto": proj, "flow": flow_id,
@@ -840,7 +1043,10 @@ def cx_update_flow(flow: str = "", body: dict | None = None, update_mask: str = 
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
+        # The permission is checked BEFORE touching the resource: a read-only
+        # agent says "SOLO LECTURA", not "flow not found".
+        assert_writable(proj, agent_id, CFG)
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         data = cons.patch_flow(agent_id, flow_id, body or {},
                                 update_mask=update_mask or None, project=proj)
@@ -856,7 +1062,7 @@ def cx_list_pages(flow: str = "", agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         pages = cons.list_pages(agent_id, flow_id, proj)
         return {"agente": agent_id, "proyecto": proj, "flow": flow_id,
@@ -875,7 +1081,7 @@ def cx_get_page(flow: str = "", page: str = "", agent: str = "",
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         page_id = _resolve_page(cons, agent_id, flow_id, page, proj)
         data = cons.get_page(agent_id, flow_id, page_id, project=proj)
@@ -895,7 +1101,10 @@ def cx_update_page(flow: str = "", page: str = "", body: dict | None = None,
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
+        # The permission is checked BEFORE touching the resource: a read-only
+        # agent says "SOLO LECTURA", not "flow not found".
+        assert_writable(proj, agent_id, CFG)
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         page_id = _resolve_page(cons, agent_id, flow_id, page, proj)
         data = cons.patch_page(agent_id, flow_id, page_id, body or {},
@@ -912,7 +1121,7 @@ def cx_list_playbooks(agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         pbs = cons.list_playbooks(agent_id, proj)
         return {"agente": agent_id, "proyecto": proj, "total": len(pbs),
                 "playbooks": [{"id": p["name"].split("/")[-1],
@@ -930,7 +1139,7 @@ def cx_get_playbook(playbook: str = "", agent: str = "", project: str = "") -> d
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         pb_id, pb_name = _resolve_playbook(cons, agent_id, playbook, proj)
         url = cons._url(f"{cons._base(proj)}/agents/{agent_id}/playbooks/{pb_id}")
         data = cons.request("GET", url)
@@ -951,7 +1160,7 @@ def cx_update_playbook(playbook: str = "", body: dict | None = None,
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         # A playbook is only written on an CXP_AGENT_READWRITE agent
         # (our copy). Reference agents are read-only.
         assert_playbook_writable(proj, agent_id, CFG)
@@ -976,7 +1185,7 @@ def cx_list_children(agent: str = "", collection: str = "intents",
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         fn = {
             "intents": cons.list_intents,
             "entitytypes": cons.list_entity_types,
@@ -1008,7 +1217,7 @@ def cx_get_conversation(conversation: str = "", agent: str = "",
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         data = cons.get_conversation(agent_id, conversation, project=proj)
         return {"agente": agent_id, "proyecto": proj,
                 "conversacion": conversation, "datos": data}
@@ -1039,7 +1248,7 @@ def cx_detect_intent(text: str = "", session_id: str = "", agent: str = "",
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         assert_readable(proj, agent_id, CFG)
         sid = session_id or f"mcp-{abs(hash(text)) % (10 ** 12)}"
         url = cons._url(f"{cons._base(proj)}/agents/{agent_id}/sessions/{sid}"
@@ -1061,7 +1270,7 @@ def cx_train_flow(flow: str = "", agent: str = "", project: str = "") -> dict:
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         assert_writable(proj, agent_id, CFG)
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         name = _resource_name(agent_id, proj, "flows", flow_id)
@@ -1078,7 +1287,7 @@ def cx_validate_flow(flow: str = "", agent: str = "", project: str = "") -> dict
     try:
         cons = _api()
         agent_id = _resolve_agent(agent)
-        proj = project or CFG.project
+        proj = project or _proyecto_del_agente(agent_id) or CFG.project
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         name = _resource_name(agent_id, proj, "flows", flow_id)
         url = cons._url(f"{name}:validate", alt="json")
@@ -1106,7 +1315,8 @@ def cx_set_route_playbook(
     MCP writes against the console's internal backend (same proto the
     UI uses), in ~1 s. **Measured: the runtime executes the playbook.**
 
-    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - agent:   agent id (optional: it is inferred when the allowlist leaves
+               a single candidate; with several, the tool lists them).
     - flow:    flow id or displayName (default, the agent's first one).
     - page:    page id or displayName (default, the first one).
     - route:   route uuid, its EXACT condition, or its index (0-based).
@@ -1123,10 +1333,15 @@ def cx_set_route_playbook(
     agent_id = _resolve_agent(agent)
     if not agent_id:
         return {"error": "falta el agente",
-                "pista": "pasa agent=... o pon CXP_DEFAULT_AGENT en el .env"}
+                "pista": "pasa agent=<id> (los agentes permitidos estan en cx_status)"}
     cons = _api()
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     try:
+        # A write needs write permission, and it is checked BEFORE touching the
+        # resource: a read-only agent says "SOLO LECTURA", not "flow not found".
+        # A `dry_run` only reads, so it works on a read-only agent.
+        if not dry_run:
+            assert_writable(proj, agent_id, CFG)
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         if not flow_id:
             flows = cons.list_flows(agent_id, proj)
@@ -1235,7 +1450,8 @@ def cx_set_flow_route_playbook(
     (test with a custom-brand playbook: `matchType=PLAYBOOK`,
     `currentPlaybooks=[the new playbook]` and the response was its text).
 
-    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - agent:   agent id (optional: it is inferred when the allowlist leaves
+               a single candidate; with several, the tool lists them).
     - flow:    flow id or displayName (default, the agent's first one).
     - route:   route uuid, its EXACT condition, or its index (0-based).
                **If omitted, the tool only READS** and returns the flow's
@@ -1251,10 +1467,15 @@ def cx_set_flow_route_playbook(
     agent_id = _resolve_agent(agent)
     if not agent_id:
         return {"error": "falta el agente",
-                "pista": "pasa agent=... o pon CXP_DEFAULT_AGENT en el .env"}
+                "pista": "pasa agent=<id> (los agentes permitidos estan en cx_status)"}
     cons = _api()
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     try:
+        # A write needs write permission, and it is checked BEFORE touching the
+        # resource: a read-only agent says "SOLO LECTURA", not "flow not found".
+        # A `dry_run` only reads, so it works on a read-only agent.
+        if not dry_run:
+            assert_writable(proj, agent_id, CFG)
         flow_id = _resolve_flow(cons, agent_id, flow, proj)
         if not flow_id:
             flows = cons.list_flows(agent_id, proj)
@@ -1398,7 +1619,8 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
     (`flows.pages` needs a flow): up to `max_padres` candidates are used,
     so a flow without pages does not mask one that has them.
 
-    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - agent:   agent id (optional: it is inferred when the allowlist leaves
+               a single candidate; with several, the tool lists them).
     - scope:   filters the gaps by schema or by field name
                (for example `"Tool"` or `"targetPlaybook"`). Empty = all.
     - project: project (default, `CXP_PROJECT`).
@@ -1427,9 +1649,9 @@ def cx_gaps(agent: str = "", scope: str = "", project: str = "",
     agent_id = _resolve_agent(agent)
     if not agent_id:
         return {"error": "falta el agente",
-                "pista": "pasa agent=... o pon CXP_DEFAULT_AGENT en el .env"}
+                "pista": "pasa agent=<id> (los agentes permitidos estan en cx_status)"}
     cons = _api()
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     try:
         idx = load_schema_index(CFG.api_version)
     except Exception as exc:
@@ -1595,8 +1817,8 @@ def cx_endpoints_consola(endpoint: str = "", agent: str = "",
                "users.recentProjects", "agents.listAvailableModels",
                "agents.getSupportedLanguages", "agent.visibility",
                "conversationProfiles.list", "locationSettings.get").
-    - agent:   agent (for those that need it). By default,
-               `CXP_DEFAULT_AGENT`.
+    - agent:   agent (for those that need it). It is inferred when the
+               allowlist leaves a single candidate.
     - project: project (by default, `CXP_PROJECT`).
     - version: if given, forces the version (otherwise, the catalog one).
     - query:   extra query parameters.
@@ -1621,14 +1843,17 @@ def cx_endpoints_consola(endpoint: str = "", agent: str = "",
         return {"error": f"endpoint desconocido: {endpoint!r}",
                 "disponibles": [h["id"] for h in catalogo]}
 
-    agent_id = _resolve_agent(agent)
-    proj = project or CFG.project
+    # The agent is only resolved when the endpoint needs one: the project list
+    # or the recent projects do not hang off an agent, and they must not fail
+    # because the allowlist has several agents.
+    agent_id = _resolve_agent(agent) if "{agent}" in (elegido.get("path") or "") else (agent or "")
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     cons = _api()
     ver = version or elegido.get("version") or "v3alpha1"
     ruta = (elegido.get("path") or "")
     ruta = (ruta.replace("{project}", proj)
                 .replace("{location}", CFG.location)
-                .replace("{agent}", agent_id or CFG.default_agent))
+                .replace("{agent}", agent_id))
     # Routes that do not hang off `projects/` are absolute from the root.
     if not ruta.startswith("projects/"):
         ruta = "/" + ruta
@@ -1669,8 +1894,8 @@ def cx_set_console_field(recurso: str = "", campo: str = "", valor: Any = None,
                 as the value.
     - value:   the value (JSON). To delete a field, `null`.
     - dry_run: True (default) = does not write; returns the plan and the diff.
-    - agent:   agent (by default, `CXP_DEFAULT_AGENT`); only needed for
-                the short forms.
+    - agent:   agent (only needed for the short forms); it is inferred when
+                the allowlist leaves a single candidate.
 
     NOTE: to set the target to a playbook, `targetPlaybook` is a `oneof`
     with `targetPage`/`targetFlow`: those two must be removed. `cx_set_route_playbook` does it
@@ -1680,16 +1905,20 @@ def cx_set_console_field(recurso: str = "", campo: str = "", valor: Any = None,
     agent_id = _resolve_agent(agent)
     if not agent_id:
         return {"error": "falta el agente",
-                "pista": "pasa agent=... o pon CXP_DEFAULT_AGENT en el .env"}
+                "pista": "pasa agent=<id> (los agentes permitidos estan en cx_status)"}
     if not recurso or not campo:
         return {"error": "faltan recurso y/o campo",
                 "pista": "recurso=... y campo=... (pista: cx_gaps)"}
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     nombre = _resolve_resource_name(recurso, agent_id, proj)
     if not nombre:
         return {"error": "no se pudo resolver el recurso", "recurso": recurso}
 
     try:
+        # A write needs write permission, and it is checked BEFORE touching the
+        # resource. A `dry_run` only reads, so it works on a read-only agent.
+        if not dry_run:
+            assert_writable(proj, agent_id, CFG)
         res = set_field(_api(), nombre, campo, valor, dry_run=dry_run,
                         project=proj)
     except PermissionDeniedError as exc:
@@ -1717,7 +1946,8 @@ def cx_set_group_route_playbook(agent: str = "", group: str = "", route: str = "
     public API declares that same `TransitionRoute` **without** `targetPlaybook`:
     it cannot be expressed via public API.
 
-    - agent:   agent id (default, `CXP_DEFAULT_AGENT`).
+    - agent:   agent id (optional: it is inferred when the allowlist leaves
+               a single candidate; with several, the tool lists them).
     - group:   id or displayName of the route group.
     - route:   route uuid, its EXACT condition, or its index (0-based).
                **If omitted, the tool only READS** and returns the routes
@@ -1732,10 +1962,15 @@ def cx_set_group_route_playbook(agent: str = "", group: str = "", route: str = "
     agent_id = _resolve_agent(agent)
     if not agent_id:
         return {"error": "falta el agente",
-                "pista": "pasa agent=... o pon CXP_DEFAULT_AGENT en el .env"}
+                "pista": "pasa agent=<id> (los agentes permitidos estan en cx_status)"}
     cons = _api()
-    proj = project or CFG.project
+    proj = project or _proyecto_del_agente(agent_id) or CFG.project
     try:
+        # A write needs write permission, and it is checked BEFORE touching the
+        # resource: a read-only agent says "SOLO LECTURA", not "group not found".
+        # A `dry_run` only reads, so it works on a read-only agent.
+        if not dry_run:
+            assert_writable(proj, agent_id, CFG)
         grupos = cons.list_transition_route_groups(agent_id, proj)
     except Exception as exc:
         return _err(exc)

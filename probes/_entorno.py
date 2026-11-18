@@ -4,8 +4,9 @@ The agent ids used by the probes are taken from the environment:
 
     CXP_PROBE_AGENTS="original=uuid1,uuid2;clon=uuid3,uuid4"
 
-If nothing is set, the default agent from the `.env`
-(`CXP_DEFAULT_AGENT`) is used, under the `por_defecto` key.
+If nothing is set, the **only** agent of the allowlist (`.env`) is used, under
+the `por_defecto` key. With more than one agent the probe says so: it does not
+guess.
 """
 from __future__ import annotations
 
@@ -33,8 +34,8 @@ def agentes_de_sonda() -> dict[str, tuple[str, ...]]:
             out[clave.strip()] = ids
     if not out:
         cfg = load_config()
-        if cfg.default_agent:
-            out["por_defecto"] = (cfg.default_agent,)
+        if cfg.only_agent():
+            out["por_defecto"] = (cfg.only_agent(),)
     return out
 
 

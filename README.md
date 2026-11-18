@@ -32,8 +32,8 @@
 | **What it mirrors** | The public `v3beta1` API: **162 methods / 32 resources**, 1:1, in any version |
 | **What it adds** | The **gaps**: fields, endpoints and behaviours the public API cannot express |
 | **How it talks** | Your Google session cookies + `SAPISIDHASH` (first-party), like the console does |
-| **How it is configured** | One `.env`, no code changes, no hardcoded ids |
-| **How it is verified** | 91 unit tests + a live measurement of the 38 internal fields ([report](docs/VERIFICATION.md)) |
+| **How it is configured** | One `.env`: the credentials **and the allowlist of agents** (there is no hardcoded id) |
+| **How it is verified** | 109 unit tests + a live measurement of the 38 internal fields ([report](docs/VERIFICATION.md)) |
 
 **The setup in one command** (your agent does the rest):
 
@@ -202,10 +202,14 @@ CXP_LOCATION=global
 CXP_CONSOLE_ORIGIN=https://conversational-agents.cloud.google.com
 CXP_API_KEY=AIzaSy...
 CXP_COOKIE="SAPISID=...; SID=...; ..."
-CXP_DEFAULT_AGENT=<agent-uuid>
 CXP_AGENT_READWRITE=<agent-uuid>          # ONLY your own copy
 CXP_AGENT_READ=<other-agent-uuid>,...      # read-only
 ```
+
+**The two agent lists ARE the configuration of the agents.** There is no "default
+agent": the MCP works on the agents of `CXP_AGENT_READ` and `CXP_AGENT_READWRITE`,
+and on nothing else. **At least one of the two must have an agent**, otherwise the
+MCP has nothing to work on and says so.
 
 The full list of variables is in [`.env.example`](.env.example). The most important ones:
 
@@ -220,9 +224,8 @@ The full list of variables is in [`.env.example`](.env.example). The most import
 | `CXP_SAPISID`, `CXP_SID`, `CXP_HSID`, `CXP_SSID`, `CXP_APISID` | alternative | the cookies one by one (only for the signature) |
 | `CXP_SESSION_FILE` | alternative | Playwright `storage_state` to extract them from |
 | `CXP_API_VERSION` | no (`v3beta1`) | proto version of the internal backend |
-| `CXP_DEFAULT_AGENT` | no | the agent to work on when none is given |
-| **`CXP_AGENT_READ`** | — | agents allowed to **read** |
-| **`CXP_AGENT_READWRITE`** | — | agents allowed to **read and write** |
+| **`CXP_AGENT_READ`** | **yes** (one of the two) | agents allowed to **read** |
+| **`CXP_AGENT_READWRITE`** | **yes** (one of the two) | agents allowed to **read and write** |
 | `CXP_PROJECTS` | no | (optional) restricts the allowed projects |
 | `CXP_ENV_FILE` | no | path to the `.env` to load (searched first) |
 
@@ -230,17 +233,28 @@ The `.env` is looked up in: `CXP_ENV_FILE` → the package root → the current 
 `~/.config/cx-playbook.env`. `CXP_*` environment variables take priority over the file
 (**they do not merge**: an environment variable *replaces* the `.env` value).
 
-### Per-agent permissions (the allowlist)
+### The agents of the allowlist are the only agents
 
 An agent **without** an entry in `CXP_AGENT_READ` nor in `CXP_AGENT_READWRITE` is **not
 accessible at all** (not even for reading). Entries accept two forms:
 
 - `<uuid>` → the permission travels with the uuid: it is valid in any project.
-- `<project>/<uuid>` → matches project and agent together.
+- `<project>/<uuid>` → matches project and agent together, **and the MCP works on
+  that agent in that project** (it does not need `CXP_PROJECT` to be its project).
 
 The project is deduced from the **request path**, not from `CXP_PROJECT`: that way the
 same MCP can read an agent in PROD (which lives in another project) without opening write
 access to it.
+
+**What that means in practice:**
+
+| | |
+|---|---|
+| `cx_list_agents` | lists **only** the agents of the allowlist. The ones your session can see but that are not on the list **do not appear** (`ocultos_por_permisos` says how many were filtered out) |
+| `cx_status` | shows the permission table, the allowed agent ids, a **real GET on each of them** (`agentes_comprobados`: an entry may point to an agent that no longer exists) and the **rules** the agent must follow |
+| reads | only on the allowed agents; anything else is refused with `no tiene permiso` |
+| writes | only on `CXP_AGENT_READWRITE`; an agent of `CXP_AGENT_READ` is refused with `es SOLO LECTURA` (checked **before** touching the resource) |
+| `agent=` omitted | it works when the allowlist leaves a **single** candidate; with several, the tool says which ones are available instead of guessing |
 
 > **HARD RULE:** `CXP_AGENT_READWRITE` must contain **ONLY your own copy** of the agent.
 > Never the reference agent nor the production one: editing a playbook that is not your
@@ -257,7 +271,7 @@ layer** (`cxp/console_api.py`), not only in the MCP layer:
 - `cx_batch` applies the guard **per sub-request**.
 - No path (not even the generic passthrough) can bypass the allowlist.
 
-Covered by `tests/test_guard_seguridad.py`.
+Covered by `tests/test_guard_seguridad.py` and `tests/test_permisos_agente.py`.
 
 ---
 
@@ -303,7 +317,7 @@ existing prompts keep working.
 
 | tool | what it does |
 |---|---|
-| `cx_status` | configuration, the **permission table** and backend health (a real GET) |
+| `cx_status` | configuration, the **permission table**, the **rules** and backend health (a real GET). **Call it first** |
 | `cx_discover` | the API map, taken from the backend's **official discovery doc** (162 methods / 32 resources in v3beta1). `filter="flows"`, `method="agents.flows.train"` |
 | `cx_api` | **any** method, 1:1, **in any version**: `method="agents.playbooks.patch"` or `method="GET", path="agents/{agent}/flows"`, with `version="v3alpha1"` |
 | `cx_endpoints_consola` | the endpoints the console uses and that **are in no descriptor**, and that `cx_api` could not reach |
@@ -332,11 +346,12 @@ One single rule, the same for everything (it lives in `cxp/endpoint.py`):
 
 ### The typed core
 
-`cx_list_agents`, `cx_get_agent`, `cx_update_agent`, `cx_list_flows`, `cx_get_flow`,
-`cx_update_flow`, `cx_list_pages`, `cx_get_page`, `cx_update_page`, `cx_list_playbooks`,
-`cx_get_playbook`, `cx_update_playbook`, `cx_list_children` (intents / entityTypes /
-tools / webhooks / transitionRouteGroups / generators / changelogs / conversations),
-`cx_get_conversation`, `cx_detect_intent`, `cx_train_flow`, `cx_validate_flow`.
+`cx_list_agents` (only the agents of the allowlist), `cx_get_agent`, `cx_update_agent`,
+`cx_list_flows`, `cx_get_flow`, `cx_update_flow`, `cx_list_pages`, `cx_get_page`,
+`cx_update_page`, `cx_list_playbooks`, `cx_get_playbook`, `cx_update_playbook`,
+`cx_list_children` (intents / entityTypes / tools / webhooks / transitionRouteGroups /
+generators / changelogs / conversations), `cx_get_conversation`, `cx_detect_intent`,
+`cx_train_flow`, `cx_validate_flow`.
 
 ### The gap fillers
 
@@ -409,6 +424,24 @@ cx_limites_api()
 ---
 
 ## Instructions for the agent using this MCP
+
+The MCP **ships its own rules**: they travel with the handshake (the `instructions` of
+the MCP server) and `cx_status` returns them again. In short:
+
+1. **Use only these tools.** Never call the Dialogflow CX public API
+   (`dialogflow.googleapis.com`), the console backend or any other HTTP client
+   directly, and never reproduce this MCP's requests by hand: the public API
+   **silently drops** the fields this MCP exists to write (`targetPlaybook`,
+   `advancedSettings.speechSettings`, `dtmfPattern`, `webClientSettings`…), and the
+   MCP is also the only path that enforces the allowlist.
+2. **Work only on the agents of the allowlist** (`CXP_AGENT_READ`, `CXP_AGENT_READWRITE`).
+   The others do not exist for you: they are not listed and every operation on them is
+   refused.
+3. **Writes only on `CXP_AGENT_READWRITE`.** A read-only agent is never modified.
+4. **If a task is blocked, re-plan it inside the limits** (work on the copy instead of
+   the original, ask the user which allowed agent to use, return a plan instead of
+   applying it). Never look for a way around them. If the task genuinely needs more,
+   tell the user **exactly which permission to add** (which agent, which variable).
 
 👉 **[docs/PROMPT_AGENTE.md](docs/PROMPT_AGENTE.md)** — a ready-made block to paste into
 the system prompt of the agent that consumes this MCP (when to read first, when to

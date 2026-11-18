@@ -31,7 +31,7 @@ INTERESAN = {
 def main() -> int:
     cfg = load_config()
     api = ConsoleApi(cfg)
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     project = cfg.project
     base = api._base(project)
 

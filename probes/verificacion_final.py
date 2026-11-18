@@ -132,7 +132,7 @@ def seccion_smoke(informe: Informe) -> None:
 def seccion_limpieza(informe: Informe, cons: ConsoleApi, cfg) -> None:
     informe.seccion("3. Cleanup (temporary resources and lab agents)")
     base = (f"/projects/{cfg.project}/locations/{cfg.location}"
-            f"/agents/{cfg.default_agent}")
+            f"/agents/{cfg.only_agent()}")
 
     entornos = (cons.request("GET", cons._url(f"{base}/environments"))
                 .get("environments") or [])

@@ -82,7 +82,7 @@ def main() -> int:
     idx = SchemaIndex(doc)
     cfg = load_config()
     api = ConsoleApi(cfg)
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     project = cfg.project
 
     seen_field: dict[tuple[str, str], set[str]] = defaultdict(set)

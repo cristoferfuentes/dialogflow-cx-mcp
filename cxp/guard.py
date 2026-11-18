@@ -18,7 +18,12 @@ even for reading. Entries accept two forms:
 
 The project is derived from the **request path**, not from `CXP_PROJECT`: thus the
 same MCP can read the PROD agent (which lives in another project) with the same
-uuid in the read list."""
+uuid in the read list.
+
+There is **no default agent**: the allowlist IS the list of agents. A call
+without an explicit agent works only when the allowlist leaves exactly one
+possibility; otherwise the MCP says which agents it can work on instead of
+guessing."""
 from __future__ import annotations
 
 import re
@@ -85,6 +90,63 @@ def agent_level(project: str, agent_id: str, cfg: Config) -> str:
 def is_read_only(agent_id: str, cfg: Config) -> bool:
     """Legacy: read-only (old list `CXP_READ_ONLY_AGENTS`)."""
     return bool(agent_id) and cfg.is_read_only(agent_id)
+
+
+# --- the allowlist IS the list of agents (there is no "default agent") ------
+
+NO_AGENTS_MSG = (
+    "no hay ningun agente permitido: escribe al menos un agente en "
+    "CXP_AGENT_READ (solo lectura) o en CXP_AGENT_READWRITE (lectura y escritura)"
+)
+
+
+def _entradas(cfg: Config) -> list[tuple[str, str]]:
+    """(project, agent) of the allowlist, without duplicates."""
+    filas: list[tuple[str, str]] = []
+    for entry in cfg.agent_readwrite + cfg.agent_read:
+        project, agent = _norm(entry)
+        if agent and (project, agent) not in filas:
+            filas.append((project, agent))
+    return filas
+
+
+def agents_por_nivel(cfg: Config, level: str) -> list[str]:
+    """The allowed agent ids with a given level (`lectura` / `lectura/escritura`)."""
+    salida: list[str] = []
+    for project, agent in _entradas(cfg):
+        if agent_level(project, agent, cfg) == level and agent not in salida:
+            salida.append(agent)
+    return salida
+
+
+def resolve_agent(agent: str, cfg: Config) -> str:
+    """The agent to work on, resolved against the allowlist.
+
+    - An **explicit** agent always wins (its permission is checked afterwards).
+    - Without an explicit agent: the **only** allowed agent is used.
+    - With several allowed agents it is an error: the caller has to say which
+      one. The MCP does not guess (a guess would silently work on the wrong
+      agent).
+    - With no allowed agent at all the MCP is not configured: error.
+    """
+    raw = (agent or "").strip()
+    if raw:
+        return raw.split("/")[-1]
+    ids: list[str] = []
+    niveles: dict[str, str] = {}
+    for project, agent_id in _entradas(cfg):
+        if agent_id not in ids:
+            ids.append(agent_id)
+            niveles[agent_id] = agent_level(project, agent_id, cfg)
+    if not ids:
+        raise PermissionDeniedError(NO_AGENTS_MSG)
+    if len(ids) == 1:
+        return ids[0]
+    detalle = ", ".join(f"{agent_id} ({niveles[agent_id]})" for agent_id in ids)
+    raise PermissionDeniedError(
+        f"hay varios agentes permitidos y no se indica cual: usa agent=<id> "
+        f"({detalle})"
+    )
 
 
 def assert_readable(project: str, agent_id: str, cfg: Config) -> str:
@@ -246,20 +308,27 @@ def assert_writable(project: str, agent_id: str, cfg: Config) -> str:
 
 
 def permission_table(cfg: Config) -> list[dict]:
-    """View of the configured permissions (for `cx_status`)."""
-    rows: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    """View of the configured permissions (for `cx_status`).
+
+    **One row per agent**: when the same agent is listed twice (for example
+    the legacy `CXP_READ_ONLY_AGENTS` plus an explicit `<project>/<uuid>`
+    entry), the entry with a project wins over the bare one, and
+    read + write wins over read only."""
+    filas: dict[str, dict] = {}
     for entry in cfg.agent_readwrite + cfg.agent_read:
         project, agent = _norm(entry)
-        key = (project, agent)
-        if key in seen:
+        if not agent:
             continue
-        seen.add(key)
-        rows.append({
-            "proyecto": project or "(cualquiera)",
-            "agente": agent,
-            "permiso": LEVEL_READWRITE if any(
-                _matches(e, project, agent) for e in cfg.agent_readwrite
-            ) else LEVEL_READ,
-        })
-    return rows
+        nivel = LEVEL_READWRITE if any(
+            _matches(e, project, agent) for e in cfg.agent_readwrite
+        ) else LEVEL_READ
+        actual = filas.get(agent)
+        if actual is None:
+            filas[agent] = {"proyecto": project or "(cualquiera)",
+                            "agente": agent, "permiso": nivel}
+            continue
+        if actual["proyecto"] == "(cualquiera)" and project:
+            actual["proyecto"] = project
+        if actual["permiso"] != LEVEL_READWRITE and nivel == LEVEL_READWRITE:
+            actual["permiso"] = LEVEL_READWRITE
+    return list(filas.values())

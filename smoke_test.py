@@ -2,10 +2,11 @@
 """Smoke test del MCP: llama a las herramientas de verdad, por el protocolo MCP.
 
 Es **generico**: no hay ningun agente, flow, pagina ni playbook cableado. Todo
-se descubre en el agente que indica el `.env` (`CXP_DEFAULT_AGENT`), y lo que
-se escribe se hace sobre recursos **TEMPORALES** que se borran al final.
+se descubre en los agentes de la lista blanca del `.env` (`CXP_AGENT_READ` /
+`CXP_AGENT_READWRITE`), y lo que se escribe se hace sobre recursos
+**TEMPORALES** que se borran al final.
 
-    python smoke_test.py            # usa el agente por defecto del .env
+    python smoke_test.py            # usa el agente con escritura de la lista blanca
     CXP_AGENT_READWRITE=<uuid> python smoke_test.py
 
 REGLA DURA: solo se escribe en un agente de `CXP_AGENT_READWRITE` (nuestra
@@ -76,11 +77,44 @@ async def main() -> int:
             check("tabla de permisos", len(st.get("permisos") or []) >= 1,
                   f"n={len(st.get('permisos') or [])}")
 
-            agente = st.get("agente_por_defecto") or st.get("default_agent") or ""
-            if not agente:
-                print("   no hay agente por defecto: pon CXP_DEFAULT_AGENT en el .env")
+            # The agents of the allowlist (the MCP has no default agent):
+            # one to READ and one to WRITE. They may live in different
+            # projects, so each one carries its own.
+            visibles = st.get("agentes_visibles") or []
+            con_escritura = st.get("agentes_con_escritura") or []
+            permisos = st.get("permisos") or []
+
+            def _id(a):
+                return a.get("id", "") if isinstance(a, dict) else str(a)
+
+            agente = _id(visibles[0]) if visibles else ""
+            agente_escritura = _id(con_escritura[0]) if con_escritura else ""
+            if not agente and not agente_escritura:
+                print("   no hay ningun agente permitido: pon uno en "
+                      "CXP_AGENT_READ o CXP_AGENT_READWRITE")
                 return 1
-            print(f"   agente: {agente}")
+            # The project of the writable agent, when the allowlist declares it
+            # ('<project>/<uuid>').
+            proyecto = st.get("proyecto") or ""
+            for p_ in permisos:
+                if p_.get("agente") == agente_escritura and \
+                        p_.get("proyecto") not in (None, "", "(cualquiera)"):
+                    proyecto = p_["proyecto"]
+            print(f"   agente (lectura): {agente}")
+            print(f"   agente (escritura): {agente_escritura} | proyecto: {proyecto}")
+            # Does the writable agent really exist? An allowlist entry can
+            # point to an agent that is not there any more.
+            comprobados = {f.get("agente"): f for f in (st.get("agentes_comprobados") or [])}
+            if not agente_escritura:
+                print("   no hay agente con escritura: se saltan las pruebas de escritura")
+                return 0
+            if not (comprobados.get(agente_escritura) or {}).get("accesible"):
+                # The allowlist points to an agent that is not there: it is a
+                # configuration problem, not a failure of the MCP.
+                print(f"   AVISO: el agente con escritura {agente_escritura} no existe "
+                      f"(404): revisa CXP_AGENT_READWRITE (el MCP lo comprueba con "
+                      f"un GET real). Se saltan las pruebas de escritura.")
+                return 0
 
             # -------------------------------------------------------- discover
             print("\n== cx_discover ==")
@@ -167,7 +201,8 @@ async def main() -> int:
             print("\n== recursos temporales ==")
             marca = str(int(time.time()) % 100000)
             flow = _first(await session.call_tool("cx_api", {
-                "method": "POST", "path": "agents/{agent}/flows", "agent": agente,
+                "method": "POST", "path": "agents/{agent}/flows",
+                "agent": agente_escritura, "project": proyecto,
                 "body": {"displayName": f"zz_tmp_smoke_{marca}", "description": "temporal"}}))
             flow_id = (flow.get("datos") or {}).get("name", "").rsplit("/", 1)[-1]
             check("flow temporal creado", bool(flow_id), str(flow.get("error"))[:120])
@@ -177,7 +212,8 @@ async def main() -> int:
             try:
                 pg = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/flows/{flow}/pages",
-                    "agent": agente, "params": {"flow": flow_id},
+                    "agent": agente_escritura, "project": proyecto,
+                    "params": {"flow": flow_id},
                     "body": {"displayName": "Pagina smoke",
                              "entryFulfillment": {"messages": [
                                  {"text": {"text": ["hola"]}}]}}}))
@@ -186,7 +222,7 @@ async def main() -> int:
 
                 et = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/entityTypes",
-                    "agent": agente,
+                    "agent": agente_escritura, "project": proyecto,
                     "body": {"displayName": f"zz_tmp_smoke_et_{marca}", "kind": "KIND_MAP",
                              "entities": [{"value": "uno", "synonyms": ["uno"]}]}}))
                 et_name = (et.get("datos") or {}).get("name", "")
@@ -194,16 +230,15 @@ async def main() -> int:
 
                 # Una ruta con destino a playbook: sin ella no hay nada que
                 # probar en los tres niveles (pagina, flow, grupo de rutas).
-                st = _first(await session.call_tool("cx_status", {}))
-                proyecto = st.get("proyecto") or ""
-                pb_ref = (f"projects/{proyecto}/locations/global/agents/{agente}"
+                pb_ref = (f"projects/{proyecto}/locations/global/agents/{agente_escritura}"
                           f"/playbooks/{pb_id}")
                 ruta = [{"condition": "true", "targetPlaybook": pb_ref}]
 
                 pflow = _first(await session.call_tool("cx_api", {
                     "method": "PATCH", "path": "agents/{agent}/flows/{flow}",
-                    "agent": agente, "params": {"flow": flow_id},
-                    "body": {"name": f"projects/{proyecto}/locations/global/agents/{agente}"
+                    "agent": agente_escritura, "project": proyecto,
+                    "params": {"flow": flow_id},
+                    "body": {"name": f"projects/{proyecto}/locations/global/agents/{agente_escritura}"
                                      f"/flows/{flow_id}", "transitionRoutes": ruta},
                     "query": {"updateMask": "transitionRoutes"}}))
                 check("ruta con playbook en el flow temporal",
@@ -212,7 +247,8 @@ async def main() -> int:
 
                 ppage = _first(await session.call_tool("cx_api", {
                     "method": "PATCH", "path": "agents/{agent}/flows/{flow}/pages/{page}",
-                    "agent": agente, "params": {"flow": flow_id,
+                    "agent": agente_escritura, "project": proyecto,
+                    "params": {"flow": flow_id,
                                                 "page": page_name.rsplit("/", 1)[-1]},
                     "body": {"name": page_name, "transitionRoutes": ruta},
                     "query": {"updateMask": "transitionRoutes"}}))
@@ -222,7 +258,7 @@ async def main() -> int:
 
                 grp = _first(await session.call_tool("cx_api", {
                     "method": "POST", "path": "agents/{agent}/transitionRouteGroups",
-                    "agent": agente,
+                    "agent": agente_escritura, "project": proyecto,
                     "body": {"displayName": f"zz_tmp_smoke_grp_{marca}",
                              "transitionRoutes": ruta}}))
                 group_name = (grp.get("datos") or {}).get("name", "")
@@ -232,19 +268,21 @@ async def main() -> int:
                 # ------------------------------- destino a playbook (3 niveles)
                 print("\n== destino a playbook (los 3 niveles) ==")
                 r = _first(await session.call_tool("cx_set_route_playbook", {
-                    "agent": agente, "flow": flow_id, "page": page_name.rsplit("/", 1)[-1],
+                    "agent": agente_escritura, "project": proyecto, "flow": flow_id,
+                    "page": page_name.rsplit("/", 1)[-1],
                     "route": "true", "playbook": pb_nombre, "dry_run": True}))
                 check("nivel pagina: dry-run", r.get("modo") == "dry-run",
                       str(r.get("error") or r.get("modo"))[:140])
 
                 fr = _first(await session.call_tool("cx_set_flow_route_playbook", {
-                    "agent": agente, "flow": flow_id, "route": "true",
-                    "playbook": pb_nombre, "dry_run": True}))
+                    "agent": agente_escritura, "project": proyecto, "flow": flow_id,
+                    "route": "true", "playbook": pb_nombre, "dry_run": True}))
                 check("nivel flow: dry-run", fr.get("modo") == "dry-run",
                       str(fr.get("error") or fr.get("modo"))[:140])
 
                 gr = _first(await session.call_tool("cx_set_group_route_playbook", {
-                    "agent": agente, "group": group_name.rsplit("/", 1)[-1],
+                    "agent": agente_escritura, "project": proyecto,
+                    "group": group_name.rsplit("/", 1)[-1],
                     "route": "true", "playbook": pb_nombre, "dry_run": True}))
                 check("nivel grupo de rutas: dry-run", gr.get("modo") == "dry-run",
                       str(gr.get("error") or gr.get("modo"))[:140])
@@ -253,12 +291,14 @@ async def main() -> int:
                 print("\n== cx_set_console_field (fuera de esquema) ==")
                 dry = _first(await session.call_tool("cx_set_console_field", {
                     "recurso": et_name, "campo": "entities[0].dtmfPattern",
-                    "valor": "9", "dry_run": True, "agent": agente}))
+                    "valor": "9", "dry_run": True, "agent": agente_escritura,
+                    "project": proyecto}))
                 check("dry-run no escribe", dry.get("modo") == "dry-run",
                       str(dry.get("error"))[:120])
                 wri = _first(await session.call_tool("cx_set_console_field", {
                     "recurso": et_name, "campo": "entities[0].dtmfPattern",
-                    "valor": "9", "dry_run": False, "agent": agente}))
+                    "valor": "9", "dry_run": False, "agent": agente_escritura,
+                    "project": proyecto}))
                 check("dtmfPattern escrito y verificado", wri.get("verificado") is True,
                       str(wri)[:200])
 
@@ -278,8 +318,8 @@ async def main() -> int:
                     if "{" in path and path.split("/")[2] == "":
                         continue
                     rev = _first(await session.call_tool("cx_api", {
-                        "method": "DELETE", "path": path, "agent": agente,
-                        "params": params}))
+                        "method": "DELETE", "path": path, "agent": agente_escritura,
+                        "project": proyecto, "params": params}))
                     print(f"   borrado {path}: {rev.get('error') or 'ok'}")
 
             # ------------------------------------------------------- guardas

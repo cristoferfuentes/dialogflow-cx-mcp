@@ -9,6 +9,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- The **rules of the MCP** are now sent to the agent that consumes it: the MCP
+  server declares them in its `instructions` (they arrive with the handshake) and
+  `cx_status` returns them again in `reglas`. They say: use only these tools (never
+  the public API directly — it silently drops the fields this MCP exists to write),
+  work only on the agents of the allowlist, write only on the read/write ones, and
+  when a task is blocked, **re-plan it inside the limits** or tell the user exactly
+  which permission has to be added.
+- `tests/test_permisos_agente.py`: the tests of the new agent model (allowlist as
+  the only source of agents, resolution of an omitted `agent=`, filtering of the
+  listings, refusal of a write on a read-only agent, the rules themselves).
 - `docs/SETUP_PROMPT.md`: a **setup prompt** you can paste into any agent so it configures
   the MCP end to end (clone + install → cookies → `.env` → MCP client registration →
   verification with `cx_status`). It asks you for only three things: the project, the
@@ -28,12 +38,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **There is no default agent any more.** `CXP_DEFAULT_AGENT` is gone: the agents
+  come from `CXP_AGENT_READ` (read only) and `CXP_AGENT_READWRITE` (read + write),
+  and **at least one of the two must have an agent** (otherwise the MCP says it has
+  nothing to work on instead of failing later with a 403).
+- A tool called **without `agent=`** works when the allowlist leaves a single
+  candidate; with several, it answers with the list of the agents it can use instead
+  of guessing one.
+- `cx_list_agents` and `cx_status` list **only the agents of the allowlist**: the
+  ones the session can see but that are not on the list do not appear
+  (`ocultos_por_permisos` / `agentes_ocultos` say how many were filtered out). The
+  allowed agents that live in **another project** are added to the list too.
+- An allowlist entry written as `<project>/<uuid>` now also decides **the project**
+  the MCP works on for that agent (it does not need `CXP_PROJECT` to be its
+  project), and the permission table shows **one row per agent**.
+- `cx_status` checks the allowed agents with a **real GET** (`agentes_comprobados`):
+  an entry that points to an agent that no longer exists is reported instead of
+  failing later with a 404.
+- The permission of a write is checked **before** touching the resource: a read-only
+  agent answers "es SOLO LECTURA" and not "flow not found".
+- `cx_clone_agent` deduces the source and the target from the allowlist (read-only
+  agent → readable one, read/write agent → writable one) instead of a default agent.
 - The README is now an **onboarding document**: it explains what the MCP is for, the
   three problems it solves, how to install, configure and use it, and it links to the
   detailed documents in `docs/` instead of inlining them.
 
 ### Removed
 
+- `CXP_DEFAULT_AGENT` (and the `Config.default_agent` field): the allowlist is the
+  list of agents.
 - The GitHub Actions workflow: the repository ships the source code only, with no
   hosted CI. The badges of the README are static SVG files generated from a real
   local run.

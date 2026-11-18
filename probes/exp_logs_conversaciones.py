@@ -186,7 +186,7 @@ def main() -> int:
     cfg = load_config()
     proyecto = args.proyecto or cfg.project
     location = args.location or cfg.location
-    agente = args.agente or cfg.default_agent
+    agente = args.agente or cfg.only_agent()
     cons = ConsoleApi(cfg)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

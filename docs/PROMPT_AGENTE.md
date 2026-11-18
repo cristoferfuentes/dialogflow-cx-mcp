@@ -7,9 +7,36 @@ write the fields the public API cannot express (playbook target on a transition,
 parameter descriptions, DTMF patterns, web client settings) and **detect** the ones that
 are missing.
 
+**The rules of this MCP (they are not negotiable):**
+
+1. **Use only these tools.** Never call the Dialogflow CX public API
+   (`dialogflow.googleapis.com`), the console backend or any other HTTP client
+   directly, and never reproduce this MCP's requests by hand: the public API
+   **silently drops** the fields this MCP exists to write (`transitionRoutes[].targetPlaybook`,
+   `advancedSettings.speechSettings`, `dtmfPattern`, `webClientSettings`…), and this MCP
+   is also the only path that enforces the per-agent allowlist.
+2. **Work only on the agents of the allowlist**: `CXP_AGENT_READ` (read only) and
+   `CXP_AGENT_READWRITE` (read + write). The others do not exist for you: they are not
+   listed and every operation on them is refused.
+3. **Writes only on `CXP_AGENT_READWRITE` agents.** An agent of `CXP_AGENT_READ` is
+   never modified.
+4. **If a task is blocked by these limits, do NOT look for a way around them** (no
+   direct API call, no other credential, no crafted path, no alias). Re-plan the task
+   inside the limits (work on the copy instead of the original, ask the user which
+   allowed agent to use, return a plan instead of applying it, read the reference agent
+   instead of writing it). If the task genuinely needs more, tell the user **exactly
+   which permission has to be added** (which agent, and `CXP_AGENT_READ` or
+   `CXP_AGENT_READWRITE`).
+
 **Before the first call:** call `cx_status`. If `credenciales_ok` is `false` or
 `sesion_aceptada` is `false`, **stop**: the credentials are wrong or the Google session
-expired. Tell the user (there is no way to fix it from the MCP).
+expired. Tell the user (there is no way to fix it from the MCP). If `permisos_ok` is
+`false`, the allowlist has no agent: tell the user to add one to `CXP_AGENT_READ` or
+`CXP_AGENT_READWRITE`.
+
+`cx_status` also returns the **permission table** (`permisos`), the allowed agent ids
+(`agentes_permitidos`, `agentes_solo_lectura`, `agentes_con_escritura`) and the rules
+above (`reglas`).
 
 **If you are going to write a lot (or to clone):** call `cx_limites_api()` **first**.
 There is the MCP's memory: the measured limits of the API (exact symptom -> cause ->
@@ -28,9 +55,13 @@ measured**: the official descriptor does not document it.
 **To clone an agent:** use `cx_clone_agent(source, destination)`; it carries the
 dependency order, the id remapping and the already-solved workarounds.
 
-**To write to an agent other than the default one:** check the `permisos` table of
-`cx_status`. An agent without permission returns a clear error (`no tiene permiso`); a
-read-only one, `SOLO LECTURA`. Do not look for workarounds.
+**To work on an agent of the allowlist:** check the `permisos` table of `cx_status`.
+An agent without permission returns a clear error (`no tiene permiso`); a read-only one,
+`SOLO LECTURA`. Do not look for workarounds.
+
+**To choose which agent to work on:** there is **no default agent**. If you do not pass
+`agent=`, the tool works only when the allowlist leaves a single candidate; with several,
+it answers with the list of the agents it can use and you must pick one.
 
 **How to use `cx_set_route_playbook` (and `cx_set_flow_route_playbook`, and
 `cx_set_group_route_playbook`):**

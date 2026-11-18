@@ -22,7 +22,7 @@ def main() -> int:
     cfg = load_config()
     cons = ConsoleApi(cfg)
     base = (f"/projects/{cfg.project}/locations/{cfg.location}"
-            f"/agents/{cfg.default_agent}")
+            f"/agents/{cfg.only_agent()}")
 
     entornos = (cons.request("GET", cons._url(f"{base}/environments"))
                 .get("environments") or [])

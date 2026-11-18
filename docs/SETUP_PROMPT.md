@@ -29,6 +29,8 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
    - (optional) agent ids you may only READ -> CXP_AGENT_READ
    If I do not know the agent ids, keep going with the rest and list the agents you
    can see once the session works, so I can pick one.
+   NOTE: at least ONE of the two agent lists must have an agent: they ARE the
+   list of agents of the MCP (there is no "default agent" variable).
 
 2) INSTALL
    git clone https://github.com/cristoferfuentes/dialogflow-cx-mcp.git
@@ -67,12 +69,17 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
      CXP_CONSOLE_ORIGIN=https://conversational-agents.cloud.google.com
      CXP_API_KEY=<the key= parameter of that same console request>
      CXP_COOKIE="…"
-     CXP_DEFAULT_AGENT=<agent id>
      CXP_AGENT_READWRITE=<the agent I may write>
      CXP_AGENT_READ=<the agents I may only read, comma separated>
    Then: chmod 600 .env
    - CXP_AGENT_READWRITE MUST contain ONLY my own copy of the agent. Never the
      production one and never the reference agent.
+   - These two lists ARE the agents of the MCP: it works on them and on nothing
+     else (the others are not even listed), and at least one of the two must
+     have an agent.
+   - An entry can be `<uuid>` (valid in any project) or `<project>/<uuid>` (the
+     MCP works on that agent in that project). Use the second form for an agent
+     that lives in another project (the PROD one, for example).
    - .env is already gitignored: never commit it, never paste the cookies into the
      chat, an issue or a commit message.
 

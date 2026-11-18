@@ -35,7 +35,7 @@ TMP_FLOW = "zz_tmp_probe_router_playbook"
 
 def main() -> int:
     cfg = load_config()
-    agent_id = cfg.default_agent
+    agent_id = cfg.only_agent()
     # HARD RULE: this script can only touch our own copy.
     assert_writable(cfg.project, agent_id, cfg)
     print(f"working agent: {agent_id} (our copy, with write permission)")

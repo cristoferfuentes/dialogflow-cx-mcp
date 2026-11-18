@@ -35,7 +35,7 @@ def cookies_del_navegador(chrome) -> dict[str, str]:
 def main() -> int:
     cfg = load_config()
     objetivos = targets_de_sonda()
-    objetivo = next(iter(objetivos.values()), {"agent": cfg.default_agent})
+    objetivo = next(iter(objetivos.values()), {"agent": cfg.only_agent()})
     agente = objetivo["agent"]
     proyecto = cfg.project
 

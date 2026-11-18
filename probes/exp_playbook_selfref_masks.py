@@ -51,7 +51,7 @@ def _estado(api: ConsoleApi, base: str, pid: str) -> dict:
 
 def main() -> int:
     cfg = load_config()
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     assert_writable(cfg.project, agent, cfg)
     api = ConsoleApi(cfg)
     base = f"{api._base('')}/agents/{agent}"

@@ -30,7 +30,7 @@ def check(nombre, cond, detalle=""):
 def main() -> int:
     cons = server._api()
     cfg = server.CFG
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     project = cfg.project
     ab = f"/projects/{project}/locations/{cfg.location}"
 

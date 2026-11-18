@@ -116,10 +116,10 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.default_agent
+    agente = args.agente or cfg.only_agent()
     _proyecto = args.proyecto or cfg.project
     cons = ConsoleApi(cfg)
-    base = f"/projects/{cfg.project}/locations/{cfg.location}/agents/{cfg.default_agent}" \
+    base = f"/projects/{cfg.project}/locations/{cfg.location}/agents/{cfg.only_agent()}" \
         if args.proyecto == "" else \
         f"/projects/{args.proyecto}/locations/{cfg.location}/agents/{agente}"
 

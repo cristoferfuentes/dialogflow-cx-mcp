@@ -29,7 +29,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    agente = args.agente or cfg.default_agent
+    agente = args.agente or cfg.only_agent()
     if not agente:
         print("no agent in the .env")
         return 1

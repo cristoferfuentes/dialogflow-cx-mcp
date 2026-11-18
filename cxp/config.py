@@ -8,7 +8,6 @@ All the MCP needs is **credentials**, not a browser:
     CXP_CONSOLE_ORIGIN=https://conversational-agents.cloud.google.com
     CXP_API_KEY=AIzaSy...
     CXP_COOKIE="SAPISID=...; SID=...; HSID=...; SSID=...; APISID=..."
-    CXP_DEFAULT_AGENT=<uuid of the agent being worked with>
 
     `CXP_COOKIE` must be the **full jar** of `.google.com` (copied from the
     browser). With only the 5 mandatory cookies the backend responds 401 as
@@ -16,6 +15,8 @@ All the MCP needs is **credentials**, not a browser:
 
     # --- PERMISSIONS PER AGENT (allowlist) --------------------------------
     # An agent with no entry here is NOT accessible at all.
+    # AT LEAST ONE of the two lists must have an agent: the MCP works on the
+    # agents of the allowlist, and it does not have a "default agent".
     CXP_AGENT_READ=<uuid>,<uuid>          # read (GET/list)
     CXP_AGENT_READWRITE=<uuid>            # read + write (POST/PATCH/DELETE)
     CXP_PROJECTS=<project>,...           # optional: limits the projects
@@ -97,8 +98,9 @@ class Config:
     # Credentials
     cookies: dict[str, str] = field(default_factory=dict)
     sapisid: str = ""
-    # Agents
-    default_agent: str = ""
+    # Agents: the allowlist is the ONLY source of agents. There is no
+    # "default agent": the MCP works on the agents of `agent_read` (read-only)
+    # and `agent_readwrite` (read + write), and on nothing else.
     read_only_agents: list[str] = field(default_factory=list)  # legacy
     # Permissions (allowlist)
     agent_read: list[str] = field(default_factory=list)
@@ -150,6 +152,38 @@ class Config:
     def is_read_only(self, agent_id: str) -> bool:
         """Legacy: the agent is on the read-only list."""
         return agent_id in self.read_only_agents
+
+    def allowed_agent_ids(self) -> list[str]:
+        """The agent ids of the allowlist (read + read/write), without duplicates."""
+        ids: list[str] = []
+        for entry in self.agent_readwrite + self.agent_read:
+            agent = (entry or "").strip().split("/")[-1].strip()
+            if agent and agent not in ids:
+                ids.append(agent)
+        return ids
+
+    def only_agent(self) -> str:
+        """The single allowed agent (or '' when there is none or more than one).
+
+        The MCP itself has **no default agent**: it works on the agents of the
+        allowlist. This helper is for the probes, which need one agent to work
+        on."""
+        ids = self.allowed_agent_ids()
+        return ids[0] if len(ids) == 1 else ""
+
+    def permissions_error(self) -> str:
+        """Why the MCP cannot operate on any agent ('' when the allowlist is fine).
+
+        The allowlist is the only source of agents: with no agent in
+        `CXP_AGENT_READ` nor in `CXP_AGENT_READWRITE` there is nothing to work
+        on, and the MCP says so instead of failing later with a 403."""
+        if not self.agent_readwrite and not self.agent_read:
+            return (
+                "no hay ningun agente permitido: escribe al menos un agente en "
+                "CXP_AGENT_READ (solo lectura) o en CXP_AGENT_READWRITE "
+                "(lectura y escritura)"
+            )
+        return ""
 
     # ---------------------------------------------------------------- helpers
     @property
@@ -207,7 +241,7 @@ def load_config(env_file: str | os.PathLike | None = None) -> Config:
     # Environment variables take priority over the file.
     for k in list(env) + [f"CXP_{n}" for n in (
         "PROJECT", "LOCATION", "CONSOLE_ORIGIN", "API_KEY", "COOKIE", "SAPISID",
-        "SID", "HSID", "SSID", "APISID", "DEFAULT_AGENT", "READ_ONLY_AGENTS",
+        "SID", "HSID", "SSID", "APISID", "READ_ONLY_AGENTS",
         "SESSION_FILE", "API_VERSION", "AGENT_READ", "AGENT_READWRITE", "PROJECTS",
     )]:
         if os.environ.get(k):
@@ -232,22 +266,17 @@ def load_config(env_file: str | os.PathLike | None = None) -> Config:
     except ValueError:
         cfg.cdp_port = 9222
     cfg.novnc_url = env.get("CXP_NOVNC_URL", "").strip()
-    cfg.default_agent = env.get("CXP_DEFAULT_AGENT", "")
     cfg.read_only_agents = _split_list(env.get("CXP_READ_ONLY_AGENTS", ""))
 
     # --- Permissions: agent allowlist ---------------------------------
     # `CXP_AGENT_READWRITE` (read + write) and `CXP_AGENT_READ` (read-only).
     # The legacy `CXP_READ_ONLY_AGENTS` joins the read list.
+    # There is NO default agent: the allowlist is the only source of agents.
     cfg.agent_readwrite = _split_list(env.get("CXP_AGENT_READWRITE", ""))
     cfg.agent_read = _split_list(env.get("CXP_AGENT_READ", ""))
     for a in cfg.read_only_agents:
         if a not in cfg.agent_read:
             cfg.agent_read.append(a)
-    # The default agent is always accessible (at least for reading).
-    if cfg.default_agent:
-        if cfg.default_agent not in cfg.agent_read and \
-                cfg.default_agent not in cfg.agent_readwrite:
-            cfg.agent_read.append(cfg.default_agent)
     cfg.projects = _split_list(env.get("CXP_PROJECTS", ""))
 
     # Credentials: raw cookie > loose cookies > session file.

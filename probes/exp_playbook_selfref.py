@@ -29,7 +29,7 @@ from cxp.httpclient import HttpStatusError
 
 def main() -> int:
     cfg = load_config()
-    agent = cfg.default_agent
+    agent = cfg.only_agent()
     assert_writable(cfg.project, agent, cfg)
     api = ConsoleApi(cfg)
     base = f"{api._base('')}/agents/{agent}"
