@@ -41,7 +41,7 @@ with the exact symptom, the cause and the workaround.
 | `tool_openapi_vacio` | 400 *"Null or empty definition"* (duplicated tools without `textSchema`) | recreate them **without** `openApiSpec` (documented deviation) |
 | `tool_datastore_borrado` | 400 *"Failed to connect datastores … do not exist"* | recreate **without** `dataStoreSpec` (documented deviation) |
 | `start_flow_protegido` | the `Default Start Flow` cannot be deleted nor emptied of its handlers | do not delete it: PATCH `transitionRoutes` and nothing else |
-| `guard_metodo_propio` | `agents/{id}:export` was rejected ("no tiene permiso") | fixed in `cxp/guard.py` (the `:method` suffix is split off) |
+| `guard_metodo_propio` | `agents/{id}:export` was rejected ("has no permission") | fixed in `cxp/guard.py` (the `:method` suffix is split off) |
 | `cookies_jar_incompleto` | with **only the 5 cookies** -> **401** *"Request had invalid authentication credentials"* | send the **complete** `.google.com` jar (23 cookies): `CXP_COOKIE` as-is |
 | `page_size_maximo_100` | `pageSize=200` -> **400** *"Page size should be within [0, 100]."* (on several endpoints; on `flows` 200 is fine) | ask for <=100: `cxp.gaps._listar()` retries only with 50, 20 and 5 |
 | `detect_intent_exige_language_code` | **400** *"Field 'query_input.language_code' is missing."* | the language goes in **`queryInput.languageCode`**, not in `queryInput.text.languageCode` (that form gives 400) |
@@ -173,7 +173,7 @@ Methods each version declares (counted on the real descriptor):
 | HTTP 401 "invalid authentication credentials" | cookies are missing, cookies from other domains were sent, **or only the 5 were sent instead of the complete jar** |
 | HTTP 400 "Origin and Referer don't match" | the `Origin` header was sent |
 | The change does not appear | the `PATCH` does not include `targetPlaybook` (public proto) or the flow is not the one you thought |
-| `no tiene permiso` | the agent is not in `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` |
+| `has no permission` | the agent is not in `CXP_AGENT_READ` / `CXP_AGENT_READWRITE` |
 | The MCP subprocess does not see your variables | the MCP SDK does not inherit the environment: pass them in `env` |
 
 ---

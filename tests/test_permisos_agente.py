@@ -30,7 +30,9 @@ from cxp.guard import (
 )
 
 ESCRITURA = "11111111-1111-4111-8111-111111111111"
+ESCRITURA2 = "11111111-1111-4111-8111-111111111112"
 SOLO_LECTURA = "22222222-2222-4222-8222-222222222222"
+SOLO_LECTURA2 = "22222222-2222-4222-8222-222222222223"
 PROHIBIDO = "33333333-3333-4333-8333-333333333333"
 
 
@@ -100,15 +102,15 @@ def test_el_agente_explicito_gana():
 
 def test_agents_por_nivel():
     cfg = _cfg()
-    assert agents_por_nivel(cfg, "lectura/escritura") == [ESCRITURA]
-    assert agents_por_nivel(cfg, "lectura") == [SOLO_LECTURA]
+    assert agents_por_nivel(cfg, "read/write") == [ESCRITURA]
+    assert agents_por_nivel(cfg, "read") == [SOLO_LECTURA]
 
 
 def test_la_entrada_con_proyecto_manda():
     """`<project>/<uuid>`: the agent only exists in that project."""
     cfg = _cfg(escritura=[], lectura=[f"otro-proyecto/{SOLO_LECTURA}"])
-    assert agent_level("otro-proyecto", SOLO_LECTURA, cfg) == "lectura"
-    assert agent_level("otro", SOLO_LECTURA, cfg) == "ninguno"
+    assert agent_level("otro-proyecto", SOLO_LECTURA, cfg) == "read"
+    assert agent_level("otro", SOLO_LECTURA, cfg) == "none"
 
 
 def test_la_tabla_de_permisos_tiene_una_fila_por_agente():
@@ -122,6 +124,82 @@ def test_la_tabla_de_permisos_tiene_una_fila_por_agente():
     assert len(filas) == 2
     fila = next(f for f in filas if f["agente"] == SOLO_LECTURA)
     assert fila["proyecto"] == "proj"
+
+
+# ------------------------------------------------- varias listas, varios agentes
+def test_cada_lista_acepta_varios_agentes(tmp_path):
+    """Both lists accept as many agents as needed (comma-separated)."""
+    env = tmp_path / ".env"
+    env.write_text(
+        "CXP_PROJECT=proj\n"
+        f"CXP_AGENT_READWRITE={ESCRITURA},{ESCRITURA2}\n"
+        f"CXP_AGENT_READ={SOLO_LECTURA},{SOLO_LECTURA2}\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(env_file=env)
+    assert cfg.agent_readwrite == [ESCRITURA, ESCRITURA2]
+    assert cfg.agent_read == [SOLO_LECTURA, SOLO_LECTURA2]
+    assert cfg.allowed_agent_ids() == [
+        ESCRITURA, ESCRITURA2, SOLO_LECTURA, SOLO_LECTURA2,
+    ]
+    # each agent keeps its own level
+    assert agent_level("proj", ESCRITURA, cfg) == "read/write"
+    assert agent_level("proj", ESCRITURA2, cfg) == "read/write"
+    assert agent_level("proj", SOLO_LECTURA, cfg) == "read"
+    assert agent_level("proj", SOLO_LECTURA2, cfg) == "read"
+    # and the ones that are not on the lists are still refused
+    assert agent_level("proj", PROHIBIDO, cfg) == "none"
+    assert cfg.permissions_error() == ""
+
+
+def test_la_escritura_va_a_cualquier_agente_de_la_lista_de_escritura():
+    """The SECOND agent of `CXP_AGENT_READWRITE` is writable too."""
+    cfg = _cfg(escritura=[ESCRITURA, ESCRITURA2], lectura=[SOLO_LECTURA])
+    url = (f"https://dialogflow.clients6.google.com/v3beta1/projects/proj"
+           f"/locations/global/agents/{ESCRITURA2}/flows/f")
+    assert assert_url_allowed(url, "PATCH", cfg) == [("proj", ESCRITURA2)]
+
+
+def test_la_tabla_de_permisos_lista_todos_los_agentes():
+    from cxp.guard import permission_table
+
+    cfg = _cfg(escritura=[ESCRITURA, ESCRITURA2],
+               lectura=[SOLO_LECTURA, SOLO_LECTURA2])
+    filas = {f["agente"]: f["permiso"] for f in permission_table(cfg)}
+    assert filas == {
+        ESCRITURA: "read/write",
+        ESCRITURA2: "read/write",
+        SOLO_LECTURA: "read",
+        SOLO_LECTURA2: "read",
+    }
+
+
+# ------------------------------------------------- los mensajes, en ingles
+def test_los_mensajes_de_permisos_estan_en_ingles():
+    """The agent that consumes the MCP reads these messages: they are English."""
+    from cxp.guard import NO_AGENTS_MSG
+
+    cfg = _cfg()
+    url = (f"https://dialogflow.clients6.google.com/v3beta1/projects/proj"
+           f"/locations/global/agents/{PROHIBIDO}/flows/f")
+    with pytest.raises(PermissionDeniedError) as exc:
+        assert_url_allowed(url, "PATCH", cfg)
+    mensaje = str(exc.value)
+    assert "has no permission" in mensaje
+    assert "CXP_AGENT_READWRITE" in mensaje
+
+    url_ro = (f"https://dialogflow.clients6.google.com/v3beta1/projects/proj"
+              f"/locations/global/agents/{SOLO_LECTURA}/flows/f")
+    with pytest.raises(ReadOnlyAgentError) as exc:
+        assert_url_allowed(url_ro, "PATCH", cfg)
+    assert "READ-ONLY" in str(exc.value)
+
+    # with no agent at all the message says which variables are required
+    vacia = Config(project="proj", location="global")
+    assert "no allowed agent" in vacia.permissions_error()
+    assert "CXP_AGENT_READ" in NO_AGENTS_MSG
+    assert "REQUIRED" in NO_AGENTS_MSG
+    assert "security boundary" in NO_AGENTS_MSG
 
 
 # ------------------------------------------------------------- listados

@@ -16,8 +16,12 @@ are missing.
    `advancedSettings.speechSettings`, `dtmfPattern`, `webClientSettings`…), and this MCP
    is also the only path that enforces the per-agent allowlist.
 2. **Work only on the agents of the allowlist**: `CXP_AGENT_READ` (read only) and
-   `CXP_AGENT_READWRITE` (read + write). The others do not exist for you: they are not
-   listed and every operation on them is refused.
+   `CXP_AGENT_READWRITE` (read + write). Each list accepts as many agents as needed.
+   The others do not exist for you: they are not listed and every operation on them is
+   refused. These two variables are **required** — without them the MCP has nothing to
+   work on — and they are the **security boundary of your harness**: the session cookies
+   can reach everything the Google account can reach, and the allowlist is what keeps
+   you inside the agents the user chose.
 3. **Writes only on `CXP_AGENT_READWRITE` agents.** An agent of `CXP_AGENT_READ` is
    never modified.
 4. **If a task is blocked by these limits, do NOT look for a way around them** (no
@@ -56,8 +60,8 @@ measured**: the official descriptor does not document it.
 dependency order, the id remapping and the already-solved workarounds.
 
 **To work on an agent of the allowlist:** check the `permisos` table of `cx_status`.
-An agent without permission returns a clear error (`no tiene permiso`); a read-only one,
-`SOLO LECTURA`. Do not look for workarounds.
+An agent without permission returns a clear error (`has no permission`); a read-only one,
+`READ-ONLY` (SOLO LECTURA). Do not look for workarounds.
 
 **To choose which agent to work on:** there is **no default agent**. If you do not pass
 `agent=`, the tool works only when the allowlist leaves a single candidate; with several,
@@ -123,7 +127,7 @@ endpoints that **the console uses and that are in neither**
 ```
 cx_status()
   -> credenciales_ok: true, sesion_aceptada: true
-  -> permisos: [{agente: <uuid>, permiso: lectura/escritura}, ...]
+  -> permisos: [{agente: <uuid>, permiso: read/write}, ...]
 
 cx_discover(filter="playbook")
   -> total_metodos: 162

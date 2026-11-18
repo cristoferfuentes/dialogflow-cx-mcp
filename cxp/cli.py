@@ -119,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "set":
         if args.agent == "original" and not args.dry_run:
-            print("ERROR: el agente original es SOLO LECTURA", file=sys.stderr)
+            print("ERROR: the 'original' agent is READ-ONLY (SOLO LECTURA)",
+                  file=sys.stderr)
             return 2
         be = "public" if args.backend == "public" else "console"
         flow_id = api.resolve_flow(agent, args.flow, backend=be)

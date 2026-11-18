@@ -9,6 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The allowlist accepts as many agents as needed in each list.** `CXP_AGENT_READ` and
+  `CXP_AGENT_READWRITE` are comma-separated lists and each one can carry several agents
+  (the code already parsed them; the documentation implied a single agent per list).
+  Every agent keeps its own level and `cx_status` returns one row per agent.
+- The documentation now states **explicitly that those two variables are REQUIRED**:
+  they are what makes the MCP work (without an agent in either list there is nothing to
+  operate on and every tool refuses) **and they are the security boundary of the
+  harness** that consumes the MCP: the session cookies can reach everything the Google
+  account can reach, and the allowlist is what keeps the agent inside the agents the
+  user chose. Said in the README, `.env.example`, `docs/SETUP_PROMPT.md`,
+  `docs/PROMPT_AGENTE.md` and in the `instructions` of the MCP server.
 - The **rules of the MCP** are now sent to the agent that consumes it: the MCP
   server declares them in its `instructions` (they arrive with the handshake) and
   `cx_status` returns them again in `reglas`. They say: use only these tools (never
@@ -38,6 +49,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The messages the agent reads are now in English**: the refusals of the guard
+  (`has no permission`, `READ-ONLY (SOLO LECTURA)`, `no allowed agent`, `several allowed
+  agents and none is specified`), the permission levels of the table (`read` /
+  `read/write` instead of `lectura` / `lectura/escritura`) and the clone errors. The
+  `SOLO LECTURA` token is kept inside the English message so anything that matched it
+  still matches.
+- The README is now a **short onboarding document**: the setup prompt is the default
+  way to install (the manual install is a fallback), the obvious statements (that no
+  project or agent is hardcoded, that the server speaks stdio) are gone and the depth
+  lives in `docs/`.
 - **There is no default agent any more.** `CXP_DEFAULT_AGENT` is gone: the agents
   come from `CXP_AGENT_READ` (read only) and `CXP_AGENT_READWRITE` (read + write),
   and **at least one of the two must have an agent** (otherwise the MCP says it has
@@ -56,7 +77,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   an entry that points to an agent that no longer exists is reported instead of
   failing later with a 404.
 - The permission of a write is checked **before** touching the resource: a read-only
-  agent answers "es SOLO LECTURA" and not "flow not found".
+  agent answers "READ-ONLY (SOLO LECTURA)" and not "flow not found".
 - `cx_clone_agent` deduces the source and the target from the allowlist (read-only
   agent → readable one, read/write agent → writable one) instead of a default agent.
 - The README is now an **onboarding document**: it explains what the MCP is for, the

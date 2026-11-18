@@ -6,9 +6,15 @@ at the lowest point of the write route (not only in the MCP layer).
 
 Permission model (allowlist, via environment variables):
 
-    CXP_AGENT_READWRITE=<uuid>[,<uuid>]   read + write
-    CXP_AGENT_READ=<uuid>[,<uuid>]        read-only
+    CXP_AGENT_READWRITE=<uuid>[,<uuid>]   read + write (ONE OR MORE agents)
+    CXP_AGENT_READ=<uuid>[,<uuid>]        read-only (ONE OR MORE agents)
     CXP_PROJECTS=<project>[,...]          (optional) restricts projects
+
+**Both lists accept as many agents as needed** (comma-separated). At least one
+of the two must contain an agent: the allowlist is BOTH what the MCP works on
+and the **security boundary of the harness** that consumes it (the session
+cookies can reach everything the Google account can reach; the allowlist is
+what keeps the agent inside the agents you chose).
 
 An agent **without** an entry in either list is NOT accessible: not
 even for reading. Entries accept two forms:
@@ -31,9 +37,9 @@ from urllib.parse import unquote
 
 from .config import Config
 
-LEVEL_NONE = "ninguno"
-LEVEL_READ = "lectura"
-LEVEL_READWRITE = "lectura/escritura"
+LEVEL_NONE = "none"
+LEVEL_READ = "read"
+LEVEL_READWRITE = "read/write"
 
 # Verbs that MODIFY state: go through `assert_writable`.
 WRITE_VERBS = ("POST", "PATCH", "PUT", "DELETE")
@@ -71,7 +77,7 @@ def _matches(entry: str, project: str, agent_id: str) -> bool:
 
 
 def agent_level(project: str, agent_id: str, cfg: Config) -> str:
-    """Permission level for (project, agent): 'lectura', 'lectura/escritura' or 'ninguno'."""
+    """Permission level for (project, agent): 'read', 'read/write' or 'none'."""
     raw = (agent_id or "").strip()
     if not project and "/" in raw:
         project, _, raw = raw.partition("/")
@@ -95,8 +101,10 @@ def is_read_only(agent_id: str, cfg: Config) -> bool:
 # --- the allowlist IS the list of agents (there is no "default agent") ------
 
 NO_AGENTS_MSG = (
-    "no hay ningun agente permitido: escribe al menos un agente en "
-    "CXP_AGENT_READ (solo lectura) o en CXP_AGENT_READWRITE (lectura y escritura)"
+    "no allowed agent: write at least one agent in CXP_AGENT_READ (read-only) "
+    "or in CXP_AGENT_READWRITE (read and write). Both variables are REQUIRED: "
+    "the allowlist is what the MCP works on AND the security boundary of the "
+    "harness that consumes it"
 )
 
 
@@ -111,7 +119,7 @@ def _entradas(cfg: Config) -> list[tuple[str, str]]:
 
 
 def agents_por_nivel(cfg: Config, level: str) -> list[str]:
-    """The allowed agent ids with a given level (`lectura` / `lectura/escritura`)."""
+    """The allowed agent ids with a given level (`read` / `read/write`)."""
     salida: list[str] = []
     for project, agent in _entradas(cfg):
         if agent_level(project, agent, cfg) == level and agent not in salida:
@@ -144,7 +152,7 @@ def resolve_agent(agent: str, cfg: Config) -> str:
         return ids[0]
     detalle = ", ".join(f"{agent_id} ({niveles[agent_id]})" for agent_id in ids)
     raise PermissionDeniedError(
-        f"hay varios agentes permitidos y no se indica cual: usa agent=<id> "
+        f"several allowed agents and none is specified: use agent=<id> "
         f"({detalle})"
     )
 
@@ -154,14 +162,14 @@ def assert_readable(project: str, agent_id: str, cfg: Config) -> str:
     agent_id = (agent_id or "").split("/")[-1]
     if cfg.projects and project and project not in cfg.projects:
         raise PermissionDeniedError(
-            f"el proyecto {project} no esta en CXP_PROJECTS "
+            f"the project {project} is not in CXP_PROJECTS "
             f"({', '.join(cfg.projects)})"
         )
     nivel = agent_level(project, agent_id, cfg)
     if nivel == LEVEL_NONE:
         raise PermissionDeniedError(
-            f"el agente {agent_id} (proyecto {project or '?'}) no tiene permiso: "
-            "agregalo a CXP_AGENT_READ o CXP_AGENT_READWRITE"
+            f"the agent {agent_id} (project {project or '?'}) has no permission: "
+            "add it to CXP_AGENT_READ or CXP_AGENT_READWRITE"
         )
     return agent_id
 
@@ -174,7 +182,7 @@ def agent_from_path(path: str) -> tuple[str, str]:
 
     Without this, any method with a colon (`:export`, `:restore`, `:validate`)
     was compared against the allowlist with the suffix attached -> the request was
-    always rejected ("no tiene permiso") even if the agent was the clone.
+    always rejected ("has no permission") even if the agent was the clone.
 
     It returns the **last** agent of the path; `agents_from_url()` returns
     **all** of them (path + query), and that is what the guard uses."""
@@ -271,9 +279,9 @@ def assert_url_allowed(url: str, verb: str, cfg: Config) -> list[tuple[str, str]
     if verb in WRITE_VERBS:
         if not pares:
             raise PermissionDeniedError(
-                f"escritura {verb} sin agente identificable en la ruta: {url!r}. "
-                "Se rechaza: toda escritura de CX es por agente y debe "
-                "poder contrastarse con la lista blanca"
+                f"write {verb} without an identifiable agent in the path: {url!r}. "
+                "Rejected: every CX write is per-agent and must be checked "
+                "against the allowlist"
             )
         for proyecto, agent in pares:
             assert_writable(proyecto, agent, cfg)
@@ -301,8 +309,9 @@ def assert_writable(project: str, agent_id: str, cfg: Config) -> str:
     assert_readable(project, agent_id, cfg)
     if agent_level(project, agent_id, cfg) != LEVEL_READWRITE:
         raise ReadOnlyAgentError(
-            f"el agente {agent_id} (proyecto {project or '?'}) es SOLO LECTURA: "
-            "esta en CXP_AGENT_READ; para escribir debe estar en CXP_AGENT_READWRITE"
+            f"the agent {agent_id} (project {project or '?'}) is READ-ONLY "
+            "(SOLO LECTURA): it is in CXP_AGENT_READ; to write it must be in "
+            "CXP_AGENT_READWRITE"
         )
     return agent_id
 

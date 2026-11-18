@@ -5,9 +5,10 @@ Windsurf, VS Code, OpenCode, anything that can run shell commands), and let it d
 whole setup: install, credentials, `.env`, MCP client registration and verification.
 
 > **What the agent will need from you:** your Google Cloud **project id**, the
-> **location** (`global` unless you know otherwise) and the **agent id** you want to
-> write on. Nothing else. Everything else it can do by itself — except the cookies,
-> and only if it cannot read them from a browser session on that machine (see step 3).
+> **location** (`global` unless you know otherwise) and the **agent ids** you want to
+> read and to write on (one or more in each list). Nothing else. Everything else it
+> can do by itself — except the cookies, and only if it cannot read them from a
+> browser session on that machine (see step 3).
 
 ---
 
@@ -25,12 +26,15 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
 1) ASK ME (only what you cannot find out yourself):
    - the Google Cloud project id  -> CXP_PROJECT
    - the location                -> CXP_LOCATION (default: global)
-   - the agent id you may WRITE  -> CXP_AGENT_READWRITE
-   - (optional) agent ids you may only READ -> CXP_AGENT_READ
+   - the agent ids I may WRITE  -> CXP_AGENT_READWRITE (comma-separated, one or more)
+   - (optional) the agent ids I may only READ -> CXP_AGENT_READ (comma-separated)
    If I do not know the agent ids, keep going with the rest and list the agents you
    can see once the session works, so I can pick one.
-   NOTE: at least ONE of the two agent lists must have an agent: they ARE the
-   list of agents of the MCP (there is no "default agent" variable).
+   NOTE: these two variables are REQUIRED: they are the allowlist of agents, the
+   MCP works on them and on nothing else (there is no "default agent" variable),
+   and they are the security boundary of the harness (the cookies can reach
+   everything my Google account can reach; these lists are what keep the agent
+   inside the agents I choose).
 
 2) INSTALL
    git clone https://github.com/cristoferfuentes/dialogflow-cx-mcp.git
@@ -69,14 +73,17 @@ Docs: README.md, docs/SETUP_PROMPT.md, docs/HUECOS_API.md, docs/LIMITES_API.md
      CXP_CONSOLE_ORIGIN=https://conversational-agents.cloud.google.com
      CXP_API_KEY=<the key= parameter of that same console request>
      CXP_COOKIE="…"
-     CXP_AGENT_READWRITE=<the agent I may write>
+     CXP_AGENT_READWRITE=<the agents I may write, comma separated>
      CXP_AGENT_READ=<the agents I may only read, comma separated>
    Then: chmod 600 .env
-   - CXP_AGENT_READWRITE MUST contain ONLY my own copy of the agent. Never the
-     production one and never the reference agent.
+   - BOTH agent lists accept as many agents as needed (comma-separated). At least
+     one of the two must have an agent: without them the MCP has nothing to work on.
    - These two lists ARE the agents of the MCP: it works on them and on nothing
-     else (the others are not even listed), and at least one of the two must
-     have an agent.
+     else (the others are not even listed), and they are the security boundary of
+     your harness: the cookies can reach everything my Google account can reach,
+     and these lists are what keep you inside the agents I chose.
+   - CXP_AGENT_READWRITE MUST contain ONLY my own copies. Never the
+     production one and never the reference agent.
    - An entry can be `<uuid>` (valid in any project) or `<project>/<uuid>` (the
      MCP works on that agent in that project). Use the second form for an agent
      that lives in another project (the PROD one, for example).

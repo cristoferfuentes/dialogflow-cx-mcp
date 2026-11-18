@@ -10,8 +10,7 @@
 > An [MCP](https://modelcontextprotocol.io) server (stdio) for **Dialogflow CX** with **31 tools**.
 > It mirrors the public `v3beta1` API 1:1 **and** reaches the fields the public API silently drops
 > (`targetPlaybook`, `speechSettings`, `dtmfPattern`, `webClientSettings`…), plus the console
-> endpoints that exist in no descriptor. No project and no agent are hardcoded: everything is
-> configuration in a `.env`.
+> endpoints that exist in no descriptor.
 
 > ⚠️ **Not a Google product.** It talks to the console's internal backend with your own account's
 > first-party authentication. Read the [legal notice](#legal-notice).
@@ -29,10 +28,10 @@ Ejecuta las instrucciones de esta fuente https://raw.githubusercontent.com/crist
 
 The agent installs the package, gets the credentials, writes the `.env`, registers the server in
 your MCP client and verifies it. It will only ask you for your project id, the location and the
-agent id you may write on.
+agents you may read and write.
 
 <details>
-<summary>Manual install (if you prefer to do it yourself)</summary>
+<summary>Manual install</summary>
 
 ```bash
 git clone https://github.com/cristoferfuentes/dialogflow-cx-mcp.git
@@ -58,8 +57,8 @@ CXP_PROJECT=my-gcp-project
 CXP_LOCATION=global
 CXP_API_KEY=AIzaSy...                    # the key= of a console request
 CXP_COOKIE="SAPISID=...; SID=...; ..."  # the WHOLE Cookie header
-CXP_AGENT_READWRITE=<agent-uuid>        # ONLY your own copy of the agent
-CXP_AGENT_READ=<other-agent-uuid>,...   # read-only
+CXP_AGENT_READWRITE=<uuid>[,<uuid>...]  # read + write: ONLY your own copies
+CXP_AGENT_READ=<uuid>[,<uuid>...]       # read-only
 ```
 
 | how to get it | |
@@ -68,13 +67,22 @@ CXP_AGENT_READ=<other-agent-uuid>,...   # read-only
 | **the cookie** | same request → **Request Headers** → copy the **whole** `Cookie` header (not only the 5 "required" cookies: with 5 of 23 the answer is **401**, with the header as-is it is **200**) |
 | **automatically** | `.venv/bin/python probes/renueva_cookies.py` (real Chrome over CDP, writes the full jar into your `.env`) |
 
-**The two agent lists ARE the configuration of the agents.** There is no "default agent": the MCP
-works on the agents of `CXP_AGENT_READ` and `CXP_AGENT_READWRITE`, and on nothing else — they are
-not even listed. **At least one of the two must have an agent.**
+### The two agent lists are REQUIRED
 
-> **HARD RULE:** `CXP_AGENT_READWRITE` must contain **ONLY your own copy** of the agent, never the
-> reference one nor production. The guard is enforced in the low layer, per request, and fails
-> closed.
+`CXP_AGENT_READ` and `CXP_AGENT_READWRITE` are the allowlist, and **each one accepts as many
+agents as you need** (comma-separated).
+
+* **They are what makes the MCP work.** With no agent in either list there is nothing to operate
+  on: the server starts, but every tool refuses (`no allowed agent`).
+* **They are the security boundary of the harness.** The cookies can reach **everything** your
+  Google account can reach; the allowlist is what keeps the agent inside the agents you chose. It
+  is enforced in the low layer, on every agent of every request (path **and** query), with the
+  path canonicalized before the check, and it **fails closed**.
+* An agent that is not on the lists is not even listed: `cx_list_agents` does not show it and
+  every operation on it is refused.
+* `CXP_AGENT_READWRITE` must contain **only your own copies**, never a reference or production one.
+
+`cx_status` returns the permission table (the level of each agent: `read` / `read/write`).
 
 Full list of variables: [`.env.example`](.env.example) · Details: [docs/SETUP_PROMPT.md](docs/SETUP_PROMPT.md)
 
@@ -82,8 +90,8 @@ Full list of variables: [`.env.example`](.env.example) · Details: [docs/SETUP_P
 
 ## Register it in an MCP client
 
-The server speaks **stdio**. The `env` block is **not optional** (the SDK does not inherit the
-parent environment, so without it the server would not find your credentials):
+The `env` block is **not optional** (the SDK does not inherit the parent environment, so without it
+the server would not find your credentials):
 
 ```json
 {
@@ -109,7 +117,7 @@ parent environment, so without it the server would not find your credentials):
 
 ## Tools
 
-31 tools. The names are the API's; the responses speak Spanish.
+31 tools. The responses speak Spanish.
 
 | group | tools |
 |---|---|
@@ -178,8 +186,6 @@ python tools/verifica.py   # regenerates the badges of this README
 * **Your browser session cookies are credentials**: never commit them, never share them.
 * `.env`, `.session-state.json` and browser profiles are gitignored, and `tools/verifica.py` fails
   if a cookie, a Google API key or a `.env` appears in the tree **or in the git history**.
-* The MCP enforces an **allowlist** of agents, checked in the low layer against every agent of the
-  request, with the path canonicalized before it is sent.
 
 Report a vulnerability privately: see [SECURITY.md](SECURITY.md).
 
@@ -190,7 +196,6 @@ part of the public API, using your own account's first-party authentication.
 
 * Use it only with your own accounts and projects, and only for what the console already lets you
   do by hand.
-* Your browser session cookies are **credentials**: treat them like a password.
 * Google's APIs and policies may change at any time.
 
 ## License

@@ -91,9 +91,13 @@ targetPlaybook, advancedSettings.speechSettings, dtmfPattern, webClientSettings,
 ...), and this MCP is also the only path that enforces the per-agent allowlist.
 
 2) WORK ONLY ON THE AGENTS OF THE ALLOWLIST: the agents of CXP_AGENT_READ (read\
-only) and CXP_AGENT_READWRITE (read + write). The others do not exist for you:\
-they are not listed and every operation on them is refused. Call cx_status to\
-see the table.
+-only) and CXP_AGENT_READWRITE (read + write). Each list accepts as many agents\
+as needed. The others do not exist for you: they are not listed and every\
+operation on them is refused. Call cx_status to see the table. These two\
+variables are REQUIRED for the MCP to work at all, and they are the security\
+boundary of your harness: the session cookies can reach everything the Google\
+account can reach, and the allowlist is what keeps you inside the agents the\
+user chose.
 
 3) WRITES ONLY ON CXP_AGENT_READWRITE AGENTS. An agent of CXP_AGENT_READ is\
 never modified. If a tool needs an agent and you did not pass one, it works only\
@@ -422,7 +426,7 @@ def cx_status() -> dict:
 
     Returns where the configuration came from, whether the 5 mandatory
     cookies are present, the proto version in use, the **permission table** of each
-    agent (read / lectura-escritura / no access), the **rules** the agent that
+    agent (read / read-write / no access), the **rules** the agent that
     consumes this MCP must follow, and whether the internal backend ACCEPTS the
     session (real GET).
 
@@ -439,8 +443,8 @@ def cx_status() -> dict:
         "cookies_requeridas": list(("SAPISID", "SID", "HSID", "SSID", "APISID")),
         "cookies_faltantes": CFG.missing_cookies(),
         "agentes_permitidos": CFG.allowed_agent_ids(),
-        "agentes_solo_lectura": agents_por_nivel(CFG, "lectura"),
-        "agentes_con_escritura": agents_por_nivel(CFG, "lectura/escritura"),
+        "agentes_solo_lectura": agents_por_nivel(CFG, "read"),
+        "agentes_con_escritura": agents_por_nivel(CFG, "read/write"),
         "proyectos_permitidos": CFG.projects or "(sin restriccion)",
         "permisos": permission_table(CFG),
         "reglas": REGLAS,
@@ -482,7 +486,7 @@ def cx_status() -> dict:
                                     a["name"].split("/")[-1], CFG)}
             for a in agentes
             if agent_level(a["name"].split("/")[1],
-                           a["name"].split("/")[-1], CFG) != "ninguno"
+                           a["name"].split("/")[-1], CFG) != "none"
         ]
         out["agentes_ocultos"] = len(agentes) - len(out["agentes_visibles"])
         # Are the allowed agents really there? An entry of the allowlist may
@@ -802,18 +806,18 @@ def cx_clone_agent(origen: str = "", destino: str = "", project: str = "",
     proj = project or CFG.project
     # There is no default agent: the source is the readable agent (the
     # read-only one of the allowlist) and the target the writable one.
-    src = origen or _agente_unico(agents_por_nivel(CFG, "lectura"), "origen")
-    dst = destino or _agente_unico(agents_por_nivel(CFG, "lectura/escritura"),
+    src = origen or _agente_unico(agents_por_nivel(CFG, "read"), "origen")
+    dst = destino or _agente_unico(agents_por_nivel(CFG, "read/write"),
                                     "destino")
     if not src or not dst:
         return {
-            "error": "no se puede deducir origen/destino de la lista blanca",
-            "permitidos_lectura": agents_por_nivel(CFG, "lectura"),
-            "permitidos_escritura": agents_por_nivel(CFG, "lectura/escritura"),
-            "pista": "pasa origen=<uuid> y destino=<uuid>",
+            "error": "cannot deduce the source/target from the allowlist",
+            "permitidos_lectura": agents_por_nivel(CFG, "read"),
+            "permitidos_escritura": agents_por_nivel(CFG, "read/write"),
+            "pista": "pass source=<uuid> and destination=<uuid>",
         }
     if src == dst:
-        return {"error": "origen y destino son el mismo agente"}
+        return {"error": "the source and the destination are the same agent"}
     try:
         clonador = Cloner(cons, src, dst, project=proj,
                           lecturas=lecturas, escrituras=escrituras)
@@ -883,7 +887,7 @@ def cx_list_agents(project: str = "", location: str = "",
             for a in agents:
                 parts = a["name"].split("/")
                 permiso = agent_level(parts[1], parts[-1], CFG)
-                if permiso == "ninguno":
+                if permiso == "none":
                     # Not on the allowlist: it does not exist for this MCP.
                     ocultos += 1
                     continue
@@ -956,7 +960,7 @@ def _agentes_permitidos_fuera(rows: list[dict]) -> list[dict]:
         if not agent or agent in ya:
             continue
         nivel = agent_level(project, agent, CFG)
-        if nivel == "ninguno":
+        if nivel == "none":
             continue
         fuera.append({
             "id": agent,

@@ -17,9 +17,14 @@ All the MCP needs is **credentials**, not a browser:
     # An agent with no entry here is NOT accessible at all.
     # AT LEAST ONE of the two lists must have an agent: the MCP works on the
     # agents of the allowlist, and it does not have a "default agent".
-    CXP_AGENT_READ=<uuid>,<uuid>          # read (GET/list)
-    CXP_AGENT_READWRITE=<uuid>            # read + write (POST/PATCH/DELETE)
-    CXP_PROJECTS=<project>,...           # optional: limits the projects
+    # EACH list accepts as many agents as needed (comma-separated).
+    # These two variables are REQUIRED: without them the MCP cannot work at
+    # all, and they are the security boundary of the harness that consumes it
+    # (the cookies reach everything the account can reach; the allowlist is
+    # what keeps the agent inside the agents you chose).
+    CXP_AGENT_READ=<uuid>[,<uuid>...]      # read only (GET/list)
+    CXP_AGENT_READWRITE=<uuid>[,<uuid>...] # read + write (POST/PATCH/DELETE)
+    CXP_PROJECTS=<project>,...              # optional: limits the projects
 
     CXP_READ_ONLY_AGENTS=<uuid>,<uuid>     # (legacy) merged into CXP_AGENT_READ
     CXP_SESSION_FILE=<path to a storage_state .json>   # alternative to CXP_COOKIE
@@ -179,9 +184,10 @@ class Config:
         on, and the MCP says so instead of failing later with a 403."""
         if not self.agent_readwrite and not self.agent_read:
             return (
-                "no hay ningun agente permitido: escribe al menos un agente en "
-                "CXP_AGENT_READ (solo lectura) o en CXP_AGENT_READWRITE "
-                "(lectura y escritura)"
+                "no allowed agent: write at least one agent in CXP_AGENT_READ "
+                "(read-only) or in CXP_AGENT_READWRITE (read and write). Both "
+                "variables are REQUIRED: the allowlist is what the MCP works on "
+                "AND the security boundary of the harness that consumes it"
             )
         return ""
 

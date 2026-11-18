@@ -138,4 +138,4 @@ def test_el_batch_comprueba_cada_sub_peticion(cfg):
     ], hilos=1)
     assert resultado[0]["status"] != 403, "the allowed sub-request must go through"
     assert resultado[1]["status"] == 403, "the forbidden one must be blocked"
-    assert "permiso" in str(resultado[1]["data"]).lower()
+    assert "permission" in str(resultado[1]["data"]).lower()

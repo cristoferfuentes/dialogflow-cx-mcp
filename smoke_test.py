@@ -90,8 +90,8 @@ async def main() -> int:
             agente = _id(visibles[0]) if visibles else ""
             agente_escritura = _id(con_escritura[0]) if con_escritura else ""
             if not agente and not agente_escritura:
-                print("   no hay ningun agente permitido: pon uno en "
-                      "CXP_AGENT_READ o CXP_AGENT_READWRITE")
+                print("   no allowed agent: put one in CXP_AGENT_READ or "
+                      "CXP_AGENT_READWRITE")
                 return 1
             # The project of the writable agent, when the allowlist declares it
             # ('<project>/<uuid>').

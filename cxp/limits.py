@@ -280,8 +280,8 @@ LIMITES: list[dict[str, Any]] = [
         "id": "guard_metodo_propio",
         "titulo": "El id del agente llega con el sufijo `:metodo` en los "
                   "metodos propios",
-        "sintoma": "'el agente X:export no tiene permiso' aunque X este en la "
-                   "lista blanca",
+        "sintoma": "'the agent X:export has no permission' although X is in "
+                   "the allowlist",
         "causa": "`agent_from_path` parseaba `.../agents/{id}:export` y "
                  "comparaba `{id}:export` con la lista.",
         "workaround": "Ya corregido en `cxp/guard.py`: se corta el sufijo "
